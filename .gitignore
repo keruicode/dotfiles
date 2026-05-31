@@ -1,0 +1,13 @@
+# macOS 系统垃圾文件
+.DS_Store
+
+# 绝对不要上传 SSH 密钥或凭证
+.ssh/id_rsa
+.ssh/id_rsa.pub
+.ssh/id_ed25519
+.ssh/id_ed25519.pub
+
+# 任何包含敏感信息的本地环境文件
+.env
+.netrc
+*secret*
