@@ -1,0 +1,6 @@
+return {
+  {
+    "dongli/vim-ncl",
+  },
+}
+
