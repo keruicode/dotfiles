@@ -11,3 +11,8 @@
 .env
 .netrc
 *secret*
+
+kitty
+yazi_bf
+.tmp/
+Codex_resume_yazi.md

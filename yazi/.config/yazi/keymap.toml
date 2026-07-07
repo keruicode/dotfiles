@@ -77,6 +77,12 @@ keymap = [
 
 	# Hidden files
 	{ on = ["z", "h"], run = "hidden toggle", desc = "Toggle the visibility of hidden files" },
+	{ on = ["z", "p"], run = "plugin toggle-pane min-preview", desc = "Show or hide preview pane" },
+	{ on = ["z", "P"], run = "plugin toggle-pane max-preview", desc = "Maximize or restore preview pane" },
+	{ on = ["z", "r"], run = "plugin toggle-pane reset", desc = "Reset pane layout" },
+	{ on = "+", run = "plugin zoom 1", desc = "Zoom in hovered file" },
+	{ on = "-", run = "plugin zoom -1", desc = "Zoom out hovered file" },
+	{ on = ["z", "="], run = "plugin zoom reset", desc = "Reset image preview zoom" },
 
 	# Open
 	{ on = "r", run = "open --interactive", desc = "Open selected files interactively" },
