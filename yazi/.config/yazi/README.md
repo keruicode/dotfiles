@@ -265,6 +265,14 @@ file -bL <path>
 
 如果误按 `z p` 把 preview 面板隐藏了，再按 `+` / `-` 会提示 preview 已隐藏；按一次 `z p` 或 `z r` 恢复面板即可。
 
+### tmux 重连后出现 terminal response timeout
+
+Yazi 启动时会用 DA1/DSR 请求探测终端能力。若 tmux 在隐藏 pane 中同时启动多个 Yazi，WezTerm 的响应可能超时，甚至被另一个 shell 当成输入，scrollback 中会出现 `WezTerm ...`、`22c`、破损 `cd` 或 `bad pattern`。
+
+当前 tmux 已启用 `allow-passthrough on`，也没有绑定会截获 CSI 前导符的 `M-[`。SR 恢复时只恢复所有目录；Yazi 等到对应 pane 真正获得 client 焦点后才启动，并且切换 session/detach 不再反复退出和重开 Yazi。历史 scrollback 里的旧 timeout 会继续存在，以最新一次启动后是否新增报错为准。
+
+官方排查说明：<https://yazi-rs.github.io/docs/faq/#how-to-troubleshoot-terminal-response-timeout-errors>
+
 ### 主题没有生效
 
 检查：

@@ -1,0 +1,35 @@
+{
+  "name": "storage",
+  "session_label": "SR",
+  "mount_point": "/Volumes/storage",
+  "volume_uuid": "89E88D6B-D5E8-34D3-A8D7-D53C7B8286C4",
+  "panes": [
+    {
+      "window": "云雷达",
+      "pane": 1,
+      "path": "/Volumes/storage/WORK/SR_云雷达",
+      "resume": "yazi"
+    },
+    {
+      "window": "云雷达",
+      "pane": 2,
+      "path": "/Volumes/storage/WORK/SR_云雷达/论文大纲简易参考",
+      "resume": "yazi"
+    },
+    {
+      "window": "云雾课题",
+      "pane": 1,
+      "path": "/Volumes/storage/WORK/SR_省云雾课题"
+    },
+    {
+      "window": "AOSL",
+      "pane": 1,
+      "path": "/Volumes/storage/WORK/SR_论文修改"
+    },
+    {
+      "window": "ERA5",
+      "pane": 1,
+      "path": "/Volumes/storage/WORK/SR_软件开发"
+    }
+  ]
+}
