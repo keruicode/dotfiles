@@ -17,4 +17,5 @@ yazi_bf
 .tmp/
 __pycache__/
 *.py[cod]
-Codex_resume_tmux.md
+tmux_ai_review.md
+tmux/Codex_resume_tmux.md
