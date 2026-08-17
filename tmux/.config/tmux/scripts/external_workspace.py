@@ -31,6 +31,9 @@ STATE_PATH = Path(
 TMUX_SOCKET = os.environ.get("TMUX_EXTERNAL_SOCKET", "")
 SHELL_COMMANDS = {"bash", "dash", "fish", "sh", "zsh"}
 NOTICE_SCRIPT = Path(__file__).resolve().with_name("tmux_notice.py")
+OPERATION_LOCK_PATH = STATE_PATH.with_name("storage-operation.lock")
+OPERATION_LOG_PATH = STATE_PATH.with_name("storage-operations.log")
+BUSY_LOG_PATH = STATE_PATH.with_name("storage-eject-busy.log")
 
 
 def run(
@@ -128,6 +131,54 @@ def state_lock():
     with lock_path.open("a+", encoding="utf-8") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         yield
+
+
+def audit(action: str, detail: str) -> None:
+    try:
+        OPERATION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        with OPERATION_LOG_PATH.open("a", encoding="utf-8") as log_file:
+            fcntl.flock(log_file.fileno(), fcntl.LOCK_EX)
+            log_file.write(
+                f"{timestamp}\tpid={os.getpid()}\t{action}\t{detail}\n"
+            )
+    except OSError:
+        pass
+
+
+@contextmanager
+def operation_lock(action: str):
+    OPERATION_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with OPERATION_LOCK_PATH.open("a+", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        lock_file.seek(0)
+        lock_file.truncate()
+        lock_file.write(f"{action}\tpid={os.getpid()}\t{time.time():.3f}\n")
+        lock_file.flush()
+        audit(action, "started")
+        try:
+            yield True
+        finally:
+            audit(action, "finished")
+            lock_file.seek(0)
+            lock_file.truncate()
+            lock_file.flush()
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def operation_in_progress() -> bool:
+    OPERATION_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with OPERATION_LOCK_PATH.open("a+", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        return False
 
 
 def session_for_label(label: str) -> Optional[Tuple[str, str]]:
@@ -363,11 +414,21 @@ def wait_for_path(pane_id: str, target: str, timeout: float = 2.0) -> bool:
     return False
 
 
-def notify(message: str, level: str = "info") -> None:
+def notify(message: str, level: str = "info", duration: float = 5.0) -> None:
     if os.environ.get("TMUX"):
-        run([str(NOTICE_SCRIPT), "show", level, "5", message], timeout=4.0)
+        run(
+            [str(NOTICE_SCRIPT), "show", level, str(duration), message],
+            timeout=4.0,
+        )
     else:
         print(message)
+
+
+def clear_busy_log() -> None:
+    try:
+        BUSY_LOG_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def configured_session(config: Dict[str, object]) -> Optional[Tuple[str, str]]:
@@ -454,8 +515,14 @@ def workspace_client_pane_ids(config: Dict[str, object]) -> Set[str]:
     return pane_ids
 
 
-def focus(config: Dict[str, object], pane_id: str) -> int:
-    if not pane_id or not mounted(config):
+def focus(
+    config: Dict[str, object], pane_id: str, allow_operation: bool = False
+) -> int:
+    if (
+        not pane_id
+        or (not allow_operation and operation_in_progress())
+        or not mounted(config)
+    ):
         return 0
     if pane_id not in workspace_client_pane_ids(config):
         return 0
@@ -485,16 +552,24 @@ def focus(config: Dict[str, object], pane_id: str) -> int:
     return 0
 
 
-def focus_visible_panes(config: Dict[str, object]) -> None:
+def focus_visible_panes(
+    config: Dict[str, object], allow_operation: bool = False
+) -> None:
     for pane_id in workspace_client_pane_ids(config):
-        focus(config, pane_id)
+        focus(config, pane_id, allow_operation=allow_operation)
 
 
 def enter(
-    config: Dict[str, object], requested_session: str = "", quiet: bool = False
+    config: Dict[str, object],
+    requested_session: str = "",
+    quiet: bool = False,
+    announce_ready: bool = False,
+    allow_operation: bool = False,
 ) -> int:
     label = str(config["session_label"])
     if requested_session and requested_session != label and not requested_session.endswith(f"-{label}"):
+        return 0
+    if not allow_operation and operation_in_progress():
         return 0
     session = configured_session(config)
     if not session:
@@ -546,12 +621,14 @@ def enter(
 
     # Yazi queries the terminal at startup. Starting it in hidden panes can make
     # terminal replies land in another shell, so only resume client-visible panes.
-    focus_visible_panes(config)
+    focus_visible_panes(config, allow_operation=allow_operation)
 
     if restored and not quiet:
         notify(f"{config['name']} ready · restored {len(restored)} SR panes", "ok")
     elif busy and not quiet:
         notify(f"{config['name']} restore waiting · {', '.join(busy[:3])}", "warn")
+    elif announce_ready and not quiet:
+        notify(f"{config['name']} ready · SR already active", "ok")
     return 0 if not busy else 1
 
 
@@ -637,9 +714,8 @@ def park(
         save_state(state)
 
     if busy:
-        busy_log = STATE_PATH.with_name("storage-eject-busy.log")
-        busy_log.parent.mkdir(parents=True, exist_ok=True)
-        busy_log.write_text("\n".join(busy) + "\n", encoding="utf-8")
+        BUSY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        BUSY_LOG_PATH.write_text("\n".join(busy) + "\n", encoding="utf-8")
         if not quiet or notify_error:
             notify(f"{config['name']} still busy · {', '.join(busy[:3])}", "warn")
         return 1
@@ -648,11 +724,17 @@ def park(
     return 0
 
 
-def volume_users(config: Dict[str, object]) -> str:
-    result = run(["lsof", "-nP", "+f", "--", str(config["mount_point"])])
+def volume_users(config: Dict[str, object]) -> Tuple[bool, str, str]:
+    result = run(
+        ["lsof", "-nP", "+f", "--", str(config["mount_point"])],
+        timeout=12.0,
+    )
     if result.returncode == 0:
-        return "\n".join(result.stdout.splitlines()[:8])
-    return ""
+        return True, result.stdout.strip(), ""
+    if result.returncode == 1 and not result.stderr.strip():
+        return True, "", ""
+    detail = (result.stderr or result.stdout).strip().splitlines()
+    return False, "", detail[-1] if detail else f"lsof exited {result.returncode}"
 
 
 def save_eject_checkpoint(config: Dict[str, object]) -> bool:
@@ -672,19 +754,45 @@ def save_eject_checkpoint(config: Dict[str, object]) -> bool:
     return False
 
 
-def eject(config: Dict[str, object]) -> int:
+def eject_locked(config: Dict[str, object]) -> int:
+    started = time.monotonic()
     if not mounted(config):
-        notify(f"{config['name']} already offline")
+        clear_busy_log()
+        notify(f"{config['name']} already offline", "ok", 8.0)
+        audit("eject", "already offline")
         return 0
+    notify(f"{config['name']} eject · parking SR panes", "info", 15.0)
+    audit("eject", "parking SR panes")
     if park(config, quiet=True, notify_error=True) != 0:
+        audit("eject", "cancelled: SR pane busy")
         return 1
+    notify(f"{config['name']} eject · saving checkpoint", "info", 125.0)
+    audit("eject", "saving checkpoint")
     if not save_eject_checkpoint(config):
+        audit("eject", "cancelled: checkpoint failed")
         return 1
-    users = volume_users(config)
+    notify(f"{config['name']} eject · checking open files", "info", 15.0)
+    check_started = time.monotonic()
+    verified, users, detail = volume_users(config)
+    audit(
+        "eject",
+        f"lsof verified={verified} users={bool(users)} "
+        f"elapsed={time.monotonic() - check_started:.1f}s detail={detail or '-'}",
+    )
+    if not verified:
+        BUSY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        BUSY_LOG_PATH.write_text(
+            f"open-file check failed: {detail}\n", encoding="utf-8"
+        )
+        notify(
+            f"{config['name']} check failed · eject cancelled · {detail}",
+            "error",
+            10.0,
+        )
+        return 1
     if users:
-        busy_log = STATE_PATH.with_name("storage-eject-busy.log")
-        busy_log.parent.mkdir(parents=True, exist_ok=True)
-        busy_log.write_text(f"{users}\n", encoding="utf-8")
+        BUSY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        BUSY_LOG_PATH.write_text(f"{users}\n", encoding="utf-8")
         processes = []
         for line in users.splitlines()[1:]:
             command = line.split(maxsplit=1)[0] if line.split() else ""
@@ -696,21 +804,52 @@ def eject(config: Dict[str, object]) -> int:
         notify(
             f"{config['name']} busy · {summary} · eject cancelled",
             "warn",
+            10.0,
         )
+        audit("eject", f"cancelled: volume busy ({summary})")
         return 1
-    result = run(["diskutil", "eject", str(config["mount_point"])])
+    clear_busy_log()
+    notify(f"{config['name']} eject · releasing disk", "info", 50.0)
+    disk_started = time.monotonic()
+    result = run(
+        ["diskutil", "eject", str(config["mount_point"])], timeout=45.0
+    )
+    audit(
+        "eject",
+        f"diskutil rc={result.returncode} "
+        f"elapsed={time.monotonic() - disk_started:.1f}s",
+    )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()
         notify(
             f"{config['name']} eject failed · {detail[-1] if detail else 'diskutil error'}",
             "error",
+            10.0,
         )
         return result.returncode or 1
-    notify(f"{config['name']} ejected · SR paths saved", "ok")
+    elapsed = time.monotonic() - started
+    notify(
+        f"{config['name']} ejected · SR paths saved · {elapsed:.0f}s", "ok", 10.0
+    )
+    audit("eject", f"success elapsed={elapsed:.1f}s")
     return 0
 
 
-def restore(config: Dict[str, object], client_tty: str = "") -> int:
+def eject(config: Dict[str, object]) -> int:
+    with operation_lock("eject") as acquired:
+        if not acquired:
+            notify(
+                f"{config['name']} operation already running · wait for final result",
+                "warn",
+                10.0,
+            )
+            audit("eject", "duplicate request ignored")
+            return 1
+        return eject_locked(config)
+
+
+def restore_locked(config: Dict[str, object], client_tty: str = "") -> int:
+    notify(f"{config['name']} restore · checking storage and SR", "info")
     session = ensure_session(config)
     if not session:
         notify(f"{config['name']} restore failed · could not create SR session", "error")
@@ -732,7 +871,25 @@ def restore(config: Dict[str, object], client_tty: str = "") -> int:
         notify(f"{config['name']} ready · switch to {session[1]} to restore paths", "ok")
         return 0 if not detail else 1
     time.sleep(0.2)
-    return enter(config, session[1])
+    return enter(
+        config,
+        session[1],
+        announce_ready=True,
+        allow_operation=True,
+    )
+
+
+def restore(config: Dict[str, object], client_tty: str = "") -> int:
+    with operation_lock("restore") as acquired:
+        if not acquired:
+            notify(
+                f"{config['name']} operation already running · wait for final result",
+                "warn",
+                10.0,
+            )
+            audit("restore", "duplicate request ignored")
+            return 1
+        return restore_locked(config, client_tty)
 
 
 def status(config: Dict[str, object]) -> int:

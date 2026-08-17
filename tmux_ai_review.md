@@ -302,16 +302,18 @@ C-s U：退出可安全结束的 Yazi/空闲子 shell，所有空闲 SR shell �
 | 快捷键 / 命令 | 功能 |
 |---|---|
 | `C-s U` | 停车、保存 eject checkpoint、检查占用并弹出 storage |
-| `C-s I` | 自动挂载已连接的 storage，切入 SR，恢复固定及额外 pane 路径；Yazi 随焦点启动 |
+| `C-s I` | 自动挂载已连接的 storage，切入 SR，恢复固定及额外 pane 路径；Yazi 随焦点启动；无需恢复时也提示 `SR already active` |
 | `storage-eject` | 与 `C-s U` 相同，供普通 Zsh 使用 |
 | `storage-restore` | 与 `C-s I` 的恢复逻辑相同，供 tmux 内 Zsh 使用 |
 
-这些操作在 tmux 内只通过底栏 `mbp` 左侧的短暂通知报告结果，不再输出到覆盖整屏的 `run-shell` view。若弹盘因其他进程占用而取消，通知中显示占用进程摘要，完整 `lsof` 结果写入 `~/.local/state/tmux/storage-eject-busy.log`。
+这些操作在 tmux 内只通过底栏 `mbp` 左侧的通知报告进度和结果，不再输出到覆盖整屏的 `run-shell` view。`C-s U` 会依次显示 `parking SR panes`、`saving checkpoint`、`checking open files` 和 `releasing disk`。流程运行期间不要重复按 `U`；重复请求会显示 `operation already running`，不会再启动一份 checkpoint 或弹盘任务。
+
+若弹盘因其他进程占用而取消，通知中显示占用进程摘要，完整 `lsof` 结果写入 `~/.local/state/tmux/storage-eject-busy.log`。各阶段耗时与返回码追加到 `~/.local/state/tmux/storage-operations.log`，用于检查“长时间没反应”的具体位置。
 
 正确拔盘流程：
 
 1. 用 `Alt+a` 查看带 `storage` 标记的 Codex；保存工作，并让 Codex、编辑器、下载或计算任务正常结束。
-2. 按 `C-s U`。脚本依次执行“退出可安全结束的 Yazi/空闲子 shell、所有空闲 SR pane 回 Home、生成 `storage-before-eject` checkpoint、整盘 `lsof` 检查、`diskutil eject`”。
+2. 按一次 `C-s U`，等待底栏阶段提示。脚本依次执行“退出可安全结束的 Yazi/空闲子 shell、所有空闲 SR pane 回 Home、生成 `storage-before-eject` checkpoint、整盘 `lsof` 检查、`diskutil eject`”。
 3. 只在看到 `storage ejected` 后拔线。看到 `still busy`、`snapshot failed` 或 `eject cancelled` 时不要强拔。
 
 不需要杀掉 `4-SR`，保留停车后的 session 才能最快恢复。若 Codex 正在 storage 目录运行，脚本会拒绝自动终止它；先记录 thread ID，正常退出 Codex 并回到 shell，再执行 `C-s U`。
@@ -328,7 +330,9 @@ C-s U：退出可安全结束的 Yazi/空闲子 shell，所有空闲 SR shell �
 - session 切换和 client detach 永远不停车，避免打断后台 Codex，也避免反复向 Yazi pane 注入 `cd`。因此拔盘必须显式使用 `C-s U`，不能把“已离开 SR”当成“可以拔盘”。
 - Yazi 启动时会查询终端能力。恢复阶段只启动真实 client 当前可见的 Yazi pane，其他 pane 等获得焦点后再启动，避免 WezTerm 的 DA/DSR 响应混入另一个 shell。
 - `C-s U` 在 SR 释放后、弹盘前强制生成一份路径已回到 Home 的 checkpoint；保存或校验失败会取消弹出。
+- 从停车到 `diskutil eject` 的完整流程使用互斥锁；重复按 `U`、同时执行 `storage-restore`，或弹盘期间触发 SR 自动 hook，都不会启动冲突操作。
 - checkpoint 成功后还会用 `lsof` 检查整块盘。Finder、百度网盘或其他应用仍在使用硬盘时会取消弹出；底栏显示占用进程摘要，完整结果保存在 `~/.local/state/tmux/storage-eject-busy.log`。
+- `lsof` 最多等待 12 秒，`diskutil eject` 最多等待 45 秒。超时或无法可靠完成占用检查时会取消弹出并明确报错，不会把检查失败当成“无人占用”。
 
 固定路径映射保存在 `external-workspaces/storage.json`，额外 pane 路径和运行状态保存在 `~/.local/state/tmux/storage-workspace.json`。状态文件独立于 Resurrect 快照，因此即使快照记录的是停车后的 Home，重新进入 `4-SR` 仍会恢复正确的硬盘路径。
 
@@ -352,6 +356,63 @@ SSH 每 10 秒发送一次应用层心跳，连续两次无响应后断开；任
 
 远端 tmux 的默认状态栏已隐藏，不再显示 `[iap] 0:bash*`、主机名、时间和日期。本地 pane 顶部显示 `iap · 当前目录`；需要查看远端窗口时，按本地前缀 `C-s`，再按 `t`，可立即显示/隐藏仅含窗口名的精简状态栏。这个操作由本地直接向已连接的 IAP pane 发送命令，不需要输入远端的 `Ctrl+b` 前缀，也不会额外建立 SSH 连接。
 
+## 启动时报 `no current session`
+
+`~/.tmux.conf:<行号>: no current session` 表示配置在没有当前 session 的 tmux server 中执行了一个需要 session 目标的命令。先按报错行号检查，不要直接删除 tmux socket，也不要用 `kill-server` 规避。
+
+本机曾由下面的错误选项作用域触发：
+
+```tmux
+# 错误：repeat-time 不是 server option
+set -s repeat-time 350
+
+# 正确：设置所有 session 的全局默认值
+set -g repeat-time 350
+```
+
+当前配置已经修正。即使 server 尚无 session，整份配置也能通过检查。若以后修改配置后再次出现类似错误：
+
+```bash
+# 查看报错行及上下文
+nl -ba ~/.tmux.conf | sed -n '8,20p'
+
+# tmux 仍可进入时，修正后重新加载并检查
+tmux source-file ~/.tmux.conf
+tmux source-file -n ~/.tmux.conf
+```
+
+如果错误导致完全进不了 tmux，先绕过配置建立一个救援 session：
+
+```bash
+tmux -f /dev/null new-session -d -s rescue
+tmux source-file ~/.tmux.conf
+tmux attach -t rescue
+```
+
+`-f /dev/null` 只在启动新 server 时跳过有问题的配置，不会删除 Resurrect 快照。进入后先确认 server 是否只有这个新鲜 pane；只有没有需要保留的运行任务时，才使用 `C-s P` 恢复快照。已有多个活跃 pane 时不要重复恢复，否则会产生重复 session 和 Codex 进程。
+
+## tmux server 停止后恢复历史 session
+
+先区分两种情况：client 断开但 server 仍在时，只需 `tmux attach`；`tmux list-sessions` 显示 `no server running` 时，才需要 Resurrect。冷恢复步骤：
+
+```bash
+tmux
+# 进入新鲜的单 pane 后按 C-s P
+```
+
+当前配置也会在新 server 的第一个真实 client attach 后自动恢复最近快照。恢复期间会暂停 session 自动重编号，把新鲜的 `1-0` 临时改回 Resurrect 需要的 `0`；恢复结束后自动恢复编号 hook，因此 `1-IAP`、`2-Config`、`3-T_WORK`、`4-SR` 不会在创建途中被改乱。
+
+Resurrect 能恢复 session/window/pane、布局、工作目录、保存的 pane scrollback，以及白名单中的 Codex、Yazi、lazygit 和 IAP 命令。它不能恢复进程的内存状态；Codex 依靠 thread ID 重新 `resume`。若同一个 thread 正在 Codex App 中运行，CLI pane 会看到 `already has an active writer` 并回到 shell，这是写入保护，不是历史丢失；结束当前任务后在该 pane 重新执行对应的 `codex resume <thread-id>` 即可。
+
+检查最近快照：
+
+```bash
+readlink ~/.local/share/tmux/resurrect/last
+python3 ~/.config/tmux/scripts/tmux_snapshot.py list --limit 10
+```
+
+不要为了恢复删除 `/private/tmp/tmux-*` socket，也不要先运行 `tmux kill-server`。`C-s P` 只应在新鲜单 pane 中执行一次；若已有重要任务，先保存当前 checkpoint，再决定是否合并恢复。
+
 ## Dotfiles 结构
 
 ```text
@@ -374,6 +435,7 @@ dotfiles/
         │   ├── open_codex_dashboard.sh
         │   ├── paste_from_clipboard.sh
         │   ├── resurrect_foreground_process.sh
+        │   ├── resurrect_session_hooks.sh
         │   ├── resurrect_status_activity.sh
         │   ├── restore_once_attached.sh
         │   ├── tmux_notice.py
