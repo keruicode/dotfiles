@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf 'Usage: wezbg public|private|toggle|select|random|next|prev|focus\n' >&2
+  exit 2
+}
+
+command="${1:-toggle}"
+var="backdrop_mode"
+value="$command"
+
+case "$command" in
+  public|pub|work|office|safe)
+    value="public"
+    ;;
+  private|pri|personal|home)
+    value="private"
+    ;;
+  toggle|select)
+    ;;
+  random|next|prev|previous|focus)
+    var="backdrop_action"
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+encoded="$(printf '%s' "$value" | base64 | tr -d '\n')"
+printf '\033]1337;SetUserVar=%s=%s\a' "$var" "$encoded"

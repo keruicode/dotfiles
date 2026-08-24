@@ -2881,3 +2881,65 @@ git diff --check                                     PASS
 当前状态：两项修复均已现场应用并写入 dotfiles。新 tmux client attach 会更新外层
 终端标识；已经运行的旧 shell 不会被 `source-file` 反向改写，若其他旧 Yazi pane
 出现同类残影，应正常退出该 Yazi 后重新启动，或新建 window。
+
+## 2026-08-24：将当前 WezTerm 配置纳入 dotfiles
+
+### Resume 命令
+
+```bash
+codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+code resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+```
+
+Thread ID：`019f3c6f-d910-7183-b5e4-3b95f53ba179`
+
+Session log：`/Users/xiaoxiaotu/.codex/sessions/2026/07/07/rollout-2026-07-07T19-56-30-019f3c6f-d910-7183-b5e4-3b95f53ba179.jsonl`
+
+工作目录：`/Users/xiaoxiaotu/dotfiles`
+
+### 已完成
+
+新增 GNU Stow 配置包 `wezterm/`，收纳当前实际由
+`~/.config/wezterm/wezterm.lua` 加载的 `config/`、`events/`、`utils/`、`colors/`
+和 `bin/wezbg`。`~/.config/wezterm` 原本是真实目录；现在活跃配置文件逐个链接到
+dotfiles，目录中原有背景图片、旧截图和两个参考仓库均保持在原位，没有迁入 Git。
+
+背景图按 `backdrops/public/` 与 `backdrops/private/` 分类。仓库只跟踪各自的
+`.gitkeep`，嵌套 `.gitignore` 忽略本地图片及 `backdrops_past/`。现场仍有 7 个
+public 条目和 866 个 private 条目（绝大多数是指向 `~/Pictures` 的软链接）。
+
+SSH domain 已拆分为通用加载器 `config/domains.lua`、可提交示例
+`config/domains_local.example.lua` 和本机忽略文件
+`~/.config/wezterm/config/domains_local.lua`。原有域配置仍由后者加载，但主机名、
+用户名和 key 路径不会进入仓库。`events/tab-title.lua` 也移除了硬编码用户名和
+Home 路径，改用通用 IAP/domain/login 识别。
+
+仓库根目录新增中英文入口：`README.md` 和 `README_cn.md`，结构参考 theniceboy
+的双语 README，但内容仅描述本仓库的真实配置，覆盖 Stow 部署、WezTerm Colemak
+快捷键、背景控制、tmux、Yazi、Neovim、Codex/IAP 工作流与上游许可证。
+
+### 重要文件
+
+```text
+/Users/xiaoxiaotu/dotfiles/README.md
+/Users/xiaoxiaotu/dotfiles/README_cn.md
+/Users/xiaoxiaotu/dotfiles/wezterm/.stow-local-ignore
+/Users/xiaoxiaotu/dotfiles/wezterm/.config/wezterm/wezterm.lua
+/Users/xiaoxiaotu/dotfiles/wezterm/.config/wezterm/.gitignore
+/Users/xiaoxiaotu/dotfiles/wezterm/.config/wezterm/config/domains.lua
+/Users/xiaoxiaotu/dotfiles/wezterm/.config/wezterm/config/domains_local.example.lua
+/Users/xiaoxiaotu/dotfiles/wezterm/.config/wezterm/events/tab-title.lua
+```
+
+### 验证
+
+```text
+wezterm --config-file .../wezterm.lua show-keys --lua   PASS，配置可完整加载
+stow --simulate --verbose=2 --target=$HOME wezterm     PASS，全部目标已正确链接
+git check-ignore（domains_local 与背景图）             PASS
+git diff --check                                       PASS
+```
+
+当前状态：迁移和现场链接已完成，WezTerm 会自动重载；本轮改动以
+`Add WezTerm dotfiles and bilingual docs` 创建本地 commit，尚未推送。下一步建议
+在真实窗口中快速检查标签胶囊、背景切换与右键新标签 SSH 域，然后按需推送。
