@@ -6,7 +6,7 @@
 keymap = [
 	{ on = "i", run = "plugin smart-enter", desc = "Smart enter" },
 	{ on = "<Enter>", run = "plugin smart-enter", desc = "Smart enter" },
-	{ on = "S", run = 'shell "$SHELL" --block --confirm', desc = "Shell" },
+	{ on = "S", run = 'shell "CONDA_AUTO_ACTIVATE_BASE=false $SHELL" --block --confirm', desc = "Shell (preserve Conda env)" },
 	{ on = ["'", "a"], run = "plugin yamb save", desc = "Add bookmark" },
 	{ on = ["'", "'"], run = "plugin yamb jump_by_fzf", desc = "Jump bookmark by fzf" },
 	{ on = ["'", "r"], run = "plugin yamb delete_by_key", desc = "Delete bookmark by key" },

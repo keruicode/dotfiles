@@ -1,3 +1,11 @@
+# Do not let a non-interactive launcher disable colours in interactive TUIs.
+# TMUX identifies local tmux panes even when TERM_PROGRAM was not inherited.
+unset NO_COLOR
+export CLICOLOR=1
+if [[ -n ${TMUX-} || ${TERM_PROGRAM-} == WezTerm ]]; then
+  export COLORTERM=truecolor
+fi
+
 alias c='clear'
 #alias ra='ranger'
 alias ra='yazi'

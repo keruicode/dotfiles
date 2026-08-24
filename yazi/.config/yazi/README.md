@@ -148,6 +148,7 @@ sqlite3 "$1" ".schema --indent"
 | 快捷键 | 功能 |
 | --- | --- |
 | `i` / `<Enter>` | smart-enter |
+| `S` | 在当前目录打开 shell，并保留当前 Conda 环境 |
 | `' a` | 保存书签 |
 | `' '` | 通过 fzf 跳转书签 |
 | `' r` | 删除书签 |
@@ -255,7 +256,16 @@ file -bL <path>
 
 ### 图像预览不显示或质量低
 
-`yazi --debug` 中会显示终端图像协议识别情况。本机 WezTerm 在 Codex PTY 里可能被识别为 unknown，这不一定代表真实终端里不可用。实际以你自己的终端窗口打开 Yazi 为准。
+`yazi --debug` 中会显示终端图像协议识别情况。在真实 WezTerm + tmux pane 中，
+本机应显示 `TERM=tmux-256color`、`TERM_PROGRAM=WezTerm`、
+`Brand.from_env=WezTerm` 和 `Adapter.matches=Iip`。直接从 Codex 的非完整 PTY
+运行诊断可能出现 `Terminal response timeout`，不能据此判断真实 pane 失败。
+
+如果 PDF/图片预览越过 pane 边界，在相邻 Codex pane 左下角留下图像残层，
+通常是 tmux server 从非 WezTerm 进程启动后没有保存 `TERM_PROGRAM`。tmux 必须
+同时启用 `allow-passthrough on`，并在 `update-environment` 中保留 `TERM` 和
+`TERM_PROGRAM`。修复后退出并重开受影响的 Yazi，再执行 `C-s R` 整屏重绘；
+仅 `source-file` 不会反向修改已经运行的旧 shell 环境。
 
 `+` / `-` 只对图片 preview 生效。常见图片格式默认使用本地修过的 `zoom 0` previewer，普通三栏初始尺寸约为当前 preview 面板的 66%，宽预览面板约为 86%；每次缩放约 15%，所以按一次 `+` 不会直接顶满，`-` 会从放大状态逐级退回初始尺寸，但不会继续缩到初始尺寸以下。`z =` 可以把当前图片重置回 0 级。用 `z P` 最大化 preview 或 `z r` 恢复布局后，可以继续用 `+` / `-` 调整当前图片。
 
@@ -269,7 +279,11 @@ file -bL <path>
 
 Yazi 启动时会用 DA1/DSR 请求探测终端能力。若 tmux 在隐藏 pane 中同时启动多个 Yazi，WezTerm 的响应可能超时，甚至被另一个 shell 当成输入，scrollback 中会出现 `WezTerm ...`、`22c`、破损 `cd` 或 `bad pattern`。
 
-当前 tmux 已启用 `allow-passthrough on`，也没有绑定会截获 CSI 前导符的 `M-[`。SR 恢复时只恢复所有目录；Yazi 等到对应 pane 真正获得 client 焦点后才启动，并且切换 session/detach 不再反复退出和重开 Yazi。历史 scrollback 里的旧 timeout 会继续存在，以最新一次启动后是否新增报错为准。
+当前 tmux 已启用 `allow-passthrough on`，并把 `TERM`、`TERM_PROGRAM` 纳入
+`update-environment`；也没有绑定会截获 CSI 前导符的 `M-[`。SR 恢复时只恢复
+所有目录；Yazi 等到对应 pane 真正获得 client 焦点后才启动，并且切换
+session/detach 不再反复退出和重开 Yazi。历史 scrollback 里的旧 timeout 会
+继续存在，以最新一次启动后是否新增报错为准。
 
 官方排查说明：<https://yazi-rs.github.io/docs/faq/#how-to-troubleshoot-terminal-response-timeout-errors>
 
@@ -288,6 +302,16 @@ Dark/light flavor: "catppuccin-mocha" / "catppuccin-latte"
 ```
 
 如果为空，说明 `theme.toml` 没被读取，或 flavor 目录名称不匹配。
+
+如果 flavor 名称正确但整个界面接近黑白，同时 Lazygit 等其他 TUI 也失去颜色，先检查终端环境，不要重装主题：
+
+```sh
+printf 'TERM=%s COLORTERM=%s NO_COLOR=%s\n' \
+  "$TERM" "${COLORTERM:-unset}" "${NO_COLOR-unset}"
+tput colors
+```
+
+本机 tmux pane 应为 `TERM=tmux-256color`、`COLORTERM=truecolor`、`NO_COLOR=unset`，`tput colors` 应至少返回 `256`。`NO_COLOR` 只要存在就会要求支持该约定的 TUI 禁用颜色；当前 tmux 和 zsh 配置都会主动移除它。关闭再打开 WezTerm 只会重新 attach 后台 tmux，并不会重建旧 pane；退出对应 TUI 后执行 `source ~/.config/zsh/aliases.zsh` 再启动 Yazi，或直接新建 window。
 
 ## 参考来源
 

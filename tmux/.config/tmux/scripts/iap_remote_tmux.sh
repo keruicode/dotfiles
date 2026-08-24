@@ -108,7 +108,13 @@ parent_monitor_pid=$!
 readonly remote_command="
 cd '$remote_workdir' &&
 source .bashrc.minkerui >/dev/null 2>&1 &&
+export TERM=xterm-256color &&
+export COLORTERM=truecolor &&
+unset NO_COLOR &&
 (tmux has-session -t '$remote_session' 2>/dev/null || tmux new-session -d -s '$remote_session' 'exec bash -i' >/dev/null 2>&1) &&
+tmux set-option -g default-terminal screen-256color >/dev/null 2>&1 &&
+tmux set-environment -gu NO_COLOR >/dev/null 2>&1 &&
+tmux set-environment -g COLORTERM truecolor >/dev/null 2>&1 &&
 tmux set-option -g status-bg colour235 >/dev/null 2>&1 &&
 tmux set-option -g status-fg colour250 >/dev/null 2>&1 &&
 tmux set-option -g status-left '' >/dev/null 2>&1 &&
@@ -123,7 +129,7 @@ exec tmux attach-session -d -t '$remote_session'
 "
 
 while [[ "$stop" == false ]]; do
-  TERM=xterm-256color ssh \
+  env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor ssh \
     -tt \
     -o ConnectTimeout=10 \
     -o ConnectionAttempts=1 \

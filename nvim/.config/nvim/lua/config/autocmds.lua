@@ -50,6 +50,47 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
+-- Texlab shows referenced captions as virtual text. Keep the preview in normal
+-- mode, but hide it while editing so the cursor matches the real buffer text.
+local tex_inlay_state = {}
+local tex_inlay_grp = vim.api.nvim_create_augroup("LaTeXInsertInlayHints", { clear = true })
+
+local function is_tex_buffer(buf)
+  return vim.bo[buf].filetype == "tex" or vim.bo[buf].filetype == "plaintex"
+end
+
+vim.api.nvim_create_autocmd("InsertEnter", {
+  group = tex_inlay_grp,
+  callback = function(args)
+    if not is_tex_buffer(args.buf) or not vim.lsp.inlay_hint then
+      return
+    end
+
+    local enabled = vim.lsp.inlay_hint.is_enabled({ bufnr = args.buf })
+    tex_inlay_state[args.buf] = enabled
+    if enabled then
+      vim.lsp.inlay_hint.enable(false, { bufnr = args.buf })
+    end
+  end,
+})
+
+vim.api.nvim_create_autocmd("InsertLeave", {
+  group = tex_inlay_grp,
+  callback = function(args)
+    if tex_inlay_state[args.buf] then
+      vim.lsp.inlay_hint.enable(true, { bufnr = args.buf })
+    end
+    tex_inlay_state[args.buf] = nil
+  end,
+})
+
+vim.api.nvim_create_autocmd("BufWipeout", {
+  group = tex_inlay_grp,
+  callback = function(args)
+    tex_inlay_state[args.buf] = nil
+  end,
+})
+
 -- ============================================================================
 -- 终极同步流：编译成功后，自动让 Skim 跳转到当前光标位置
 -- ============================================================================

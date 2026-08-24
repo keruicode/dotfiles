@@ -2,6 +2,22 @@
 
 > 当前状态：`tmux base`、自动快照恢复、Codex 续接和 IAP 远端 tmux 重连均已在本机启用。本文是配置说明和后续决策记录，不是 B 站视频逐字稿。
 
+## 快速入口
+
+继续当前 Codex 配置任务：
+
+```bash
+codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+```
+
+若使用本机 `code` 别名：
+
+```bash
+code resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+```
+
+详细中断交接见 [`Codex_resume_tmux.md`](./Codex_resume_tmux.md)。实际配置入口是 [`.tmux.conf`](./.tmux.conf)，辅助脚本位于 [`.config/tmux/scripts/`](./.config/tmux/scripts/)。
+
 ## 结论
 
 当前方案吸收 theniceboy 配置里值得保留的部分，但不照搬整套 `agent-tracker`：
@@ -355,6 +371,25 @@ SSH 每 10 秒发送一次应用层心跳，连续两次无响应后断开；任
 远端 tmux 1.8 已启用 `mode-mouse` 和 `100000` 行历史。鼠标滚轮会进入内层 copy mode 并查看历史；按 `q` 返回当前输出。若不使用鼠标，也可按远端前缀 `Ctrl+b`，再按 `[` 进入 copy mode。
 
 远端 tmux 的默认状态栏已隐藏，不再显示 `[iap] 0:bash*`、主机名、时间和日期。本地 pane 顶部显示 `iap · 当前目录`；需要查看远端窗口时，按本地前缀 `C-s`，再按 `t`，可立即显示/隐藏仅含窗口名的精简状态栏。这个操作由本地直接向已连接的 IAP pane 发送命令，不需要输入远端的 `Ctrl+b` 前缀，也不会额外建立 SSH 连接。
+
+颜色能力在所有嵌套层保持一致：WezTerm 使用 `xterm-256color`，本地 tmux pane 使用 `tmux-256color`，IAP SSH client 使用 `xterm-256color`，login02 远端 tmux pane 使用 `screen-256color`。共享的 `.bashrc.minkerui` 不再强制降级到 8 色 `xterm`；login03 收到 `screen-256color` 后会补充 `COLORTERM=truecolor`。本地 tmux 启动时也会清除可能由 Codex 等非交互 launcher 带入的 `NO_COLOR`，并在 client attach 时更新 `TERM`、`TERM_PROGRAM`。后两项是 Yazi 在 tmux 中识别 WezTerm `Iip` 图像后端所必需的。
+
+若 Yazi、Lazygit 等多个 TUI 同时近乎黑白，使用下面的值排查，优先检查环境而不是主题：
+
+```bash
+printf 'TERM=%s COLORTERM=%s NO_COLOR=%s\n' \
+  "$TERM" "${COLORTERM:-unset}" "${NO_COLOR-unset}"
+tput colors
+```
+
+本地 pane 应显示 `tmux-256color / truecolor / unset / 256`；login03 应显示 `screen-256color / truecolor / unset / 256`。关闭再打开 WezTerm 通常只是重新 attach 仍在后台运行的 tmux server，不会重建 server、pane、shell 或其中的 Yazi。可用下面的命令核对存活时间：
+
+```bash
+tmux display-message -p 'server=#{pid} pane=#{pane_pid}'
+ps -p "$(tmux display-message -p '#{pid}')" -o lstart=,command=
+```
+
+旧 shell 已继承的环境不能通过 `tmux source-file` 反向修改。当前 zsh 启动配置会主动移除 `NO_COLOR`；对仍在运行的旧空闲 shell，退出当前 TUI 后执行 `source ~/.config/zsh/aliases.zsh` 再启动 Yazi/Lazygit，或直接新建 window。若 Yazi 的 PDF/图片层越过 pane，可用 `yazi --debug` 检查 `Brand.from_env=WezTerm` 和 `Adapter.matches=Iip`，重开 Yazi 后按 `C-s R` 强制整屏重绘。
 
 ## 启动时报 `no current session`
 

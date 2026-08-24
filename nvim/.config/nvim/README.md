@@ -193,6 +193,7 @@ LaTeX extra 会为 TeX buffer 启动 TexLab。以下是当前运行态常用映�
 | `Space cs` | 符号列表 |
 | `Space cf` | 强制格式化 |
 | `Space cd` | 当前行诊断 |
+| `Space uh` | 手动显示/隐藏当前 buffer 的 LSP inlay hints |
 | `[d` / `]d` | 上一个/下一个诊断 |
 | `[e` / `]e` | 上一个/下一个 error |
 | `[w` / `]w` | 上一个/下一个 warning |
@@ -261,6 +262,12 @@ Neovim server；如果 VimTeX 尚未加载，该命令不存在。
 LaTeX Treesitter parser 已安装，但 LaTeX Treesitter highlight 被 LazyVim
 关闭，主要语法高亮交给 VimTeX。当前配置还把 TeX 的 `conceallevel` 固定为
 0，因此 `\alpha`、数学命令和引号不会被替换成隐藏字符。
+
+TexLab 会在 `\label` 和 `\ref` 后显示编号及图注预览。这些内容是 inlay hint
+虚拟文字，不属于 `.tex` 文件，不能把光标放在其中编辑。当前配置把引用预览
+截到 60 个字符：Normal 模式保留短预览，进入 Insert 模式自动隐藏全部 inlay
+hints，让屏幕位置与真实 buffer 完全一致；退出 Insert 后自动恢复。需要长期隐藏
+时按 `Space uh`，自动恢复逻辑会尊重这个手动关闭状态。
 
 ### 9.2 推荐工作流
 
@@ -451,6 +458,12 @@ TeX buffer 中 LocalLeader 是反斜杠 `\`。例如 `\ll` 表示依次按：
 这是当前设计。warning 不自动弹窗，且常见排版 warning 被过滤。使用 `\lo`
 查看完整 latexmk/LaTeX 输出。
 
+### `\ref` 后的图注与实际插入位置不一致
+
+图注是 TexLab 的不可编辑 inlay hint，不是正文。正常模式下只显示最多 60 个
+字符；用 Colemak 的 `k` 进入 Insert 后会自动隐藏，此时再移动光标和输入。若
+Insert 模式仍显示，执行 `:LspRestart texlab`；也可按 `Space uh` 手动切换。
+
 ### 快捷键实际行为与本文不一致
 
 在目标 buffer 中执行：
@@ -474,7 +487,8 @@ buffer-local LSP/VimTeX 映射会覆盖全局映射，因此必须在实际 TeX 
 | `lazyvim.json` | 启用 LaTeX extra |
 | `lua/config/keymaps.lua` | Colemak、`r`、`S`、window 映射 |
 | `lua/config/options.lua` | Skim、缩进、剪贴板、wrap 等选项 |
-| `lua/config/autocmds.lua` | NCL、TeX conceal、Skim 正反向同步 |
+| `lua/config/autocmds.lua` | NCL、TeX conceal/inlay hints、Skim 正反向同步 |
+| `lua/plugins/extend-vimtex.lua` | VimTeX warning 过滤、TexLab 引用预览长度 |
 | `lua/plugins/extend-vimtex.lua` | VimTeX warning/Quickfix 策略 |
 | `lua/plugins/snacks.lua` | Picker/Explorer 的 Colemak 导航 |
 | `lua/plugins/smear-cursor.lua` | 光标动画 |

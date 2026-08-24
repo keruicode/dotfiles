@@ -21,4 +21,22 @@ return {
       -- vim.g.vimtex_quickfix_mode = 0
     end,
   },
+  {
+    "neovim/nvim-lspconfig",
+    opts = {
+      servers = {
+        texlab = {
+          settings = {
+            texlab = {
+              inlayHints = {
+                labelDefinitions = true,
+                labelReferences = true,
+                maxLength = 60,
+              },
+            },
+          },
+        },
+      },
+    },
+  },
 }
