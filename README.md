@@ -3,7 +3,7 @@
 [中文说明](./README_cn.md)
 
 Personal macOS terminal and editor configuration, managed as GNU Stow packages.
-The setup is centered on WezTerm, tmux, Codex, Neovim/LazyVim, Yazi, and zsh,
+The setup is centered on WezTerm, Kitty, tmux, Codex, Neovim/LazyVim, Yazi, and zsh,
 with Colemak-oriented navigation where it improves daily use.
 
 ## Packages
@@ -11,13 +11,15 @@ with Colemak-oriented navigation where it improves daily use.
 | Package | Target | Purpose |
 | --- | --- | --- |
 | `wezterm` | `~/.config/wezterm` | Terminal UI, tabs, panes, GPU rendering, and local backdrops |
+| `kitty` | `~/.config/kitty` | Nebula terminal UI, Colemak panes, and a lightweight fallback terminal |
 | `tmux` | `~/.tmux.conf`, `~/.config/tmux` | Persistent sessions, Codex dashboard, IAP reconnect, and recovery |
 | `nvim` | `~/.config/nvim` | LazyVim, LaTeX/VimTeX, Skim integration, and scientific editing |
 | `yazi` | `~/.config/yazi` | File manager, previews, themes, and image zoom |
 | `zsh` | `~/.config/zsh` | Shared aliases and terminal color environment |
 | `codex` | `~/.codex/AGENTS.md` | Global Codex workflow and scientific coding rules |
 
-Detailed guides live in [tmux/README.md](./tmux/README.md),
+Detailed guides live in [kitty/README.md](./kitty/.config/kitty/README.md),
+[tmux/README.md](./tmux/README.md),
 [nvim/.config/nvim/README.md](./nvim/.config/nvim/README.md), and
 [yazi/.config/yazi/README.md](./yazi/.config/yazi/README.md).
 
@@ -27,7 +29,7 @@ Install the main tools on macOS:
 
 ```bash
 brew install stow tmux neovim yazi lazygit starship
-brew install --cask wezterm
+brew install --cask wezterm kitty font-jetbrains-mono
 ```
 
 Clone the repository and link the selected packages into your home directory:
@@ -35,7 +37,7 @@ Clone the repository and link the selected packages into your home directory:
 ```bash
 git clone git@github.com:keruicode/dotfiles.git ~/dotfiles
 cd ~/dotfiles
-stow codex nvim tmux wezterm yazi zsh
+stow codex kitty nvim tmux wezterm yazi zsh
 ```
 
 `stow` is safe to run again after adding files. If an unmanaged file already

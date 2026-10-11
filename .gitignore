@@ -12,7 +12,6 @@
 .netrc
 *secret*
 
-kitty
 yazi_bf
 .tmp/
 __pycache__/

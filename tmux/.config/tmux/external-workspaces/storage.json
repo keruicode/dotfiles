@@ -1,6 +1,7 @@
 {
   "name": "storage",
   "session_label": "SR",
+  "close_completed_codex": true,
   "mount_point": "/Volumes/storage",
   "volume_uuid": "89E88D6B-D5E8-34D3-A8D7-D53C7B8286C4",
   "panes": [

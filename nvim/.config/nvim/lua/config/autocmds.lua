@@ -8,16 +8,18 @@
 -- e.g. vim.api.nvim_del_augroup_by_name("lazyvim_wrap_spell")
 
 ---@diagnostic disable: undefined-global
--- 反向搜索后自动聚焦回 WezTerm 终端
-vim.api.nvim_create_augroup("VimtexFocus", { clear = true })
-vim.api.nvim_create_autocmd("User", {
-  group = "VimtexFocus",
-  pattern = "VimtexEventViewReverse",
-  callback = function()
-    -- 使用 macOS 的 open 命令唤醒 WezTerm 窗口
-    os.execute("open -a 'WezTerm'")
-  end,
-})
+local is_macos = vim.fn.has("macunix") == 1
+if is_macos then
+  -- 反向搜索后自动聚焦回 WezTerm 终端
+  vim.api.nvim_create_augroup("VimtexFocus", { clear = true })
+  vim.api.nvim_create_autocmd("User", {
+    group = "VimtexFocus",
+    pattern = "VimtexEventViewReverse",
+    callback = function()
+      os.execute("open -a 'WezTerm'")
+    end,
+  })
+end
 
 -- ~/.config/lazyvim-tex/lua/config/autocmds.lua
 
@@ -94,17 +96,19 @@ vim.api.nvim_create_autocmd("BufWipeout", {
 -- ============================================================================
 -- 终极同步流：编译成功后，自动让 Skim 跳转到当前光标位置
 -- ============================================================================
-local vimtex_sync_grp = vim.api.nvim_create_augroup("VimtexLiveSync", { clear = true })
+if is_macos then
+  local vimtex_sync_grp = vim.api.nvim_create_augroup("VimtexLiveSync", { clear = true })
 
--- 监听 VimTeX 的专属事件：编译成功 (VimtexEventCompileSuccess)
-vim.api.nvim_create_autocmd("User", {
-  group = vimtex_sync_grp,
-  pattern = "VimtexEventCompileSuccess",
-  callback = function()
-    -- 确保当前启用了 VimTeX 并且阅读器已经就绪
-    if vim.b.vimtex and vim.b.vimtex.viewer then
-      -- 执行静默正向搜索 (相当于自动帮你按了 \ l v)
-      vim.cmd("silent! VimtexView")
-    end
-  end,
-})
+  -- 监听 VimTeX 的专属事件：编译成功 (VimtexEventCompileSuccess)
+  vim.api.nvim_create_autocmd("User", {
+    group = vimtex_sync_grp,
+    pattern = "VimtexEventCompileSuccess",
+    callback = function()
+      -- 确保当前启用了 VimTeX 并且阅读器已经就绪
+      if vim.b.vimtex and vim.b.vimtex.viewer then
+        -- 执行静默正向搜索 (相当于自动帮你按了 \ l v)
+        vim.cmd("silent! VimtexView")
+      end
+    end,
+  })
+end

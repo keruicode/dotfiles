@@ -4,18 +4,21 @@ import argparse
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set, Tuple
-
 
 HOME = Path.home()
 RESURRECT_DIR = Path(
@@ -35,25 +38,58 @@ CHECKPOINTS_DIR = RESURRECT_DIR / "checkpoints"
 PANE_ARCHIVE = RESURRECT_DIR / "pane_contents.tar.gz"
 LAST_LINK = RESURRECT_DIR / "last"
 NOTICE_SCRIPT = Path(__file__).resolve().with_name("tmux_notice.py")
+SAVE_TMUX_SHIM = Path(__file__).resolve().with_name("resurrect_save_tmux.sh")
+LOG_PATH = HOME / ".local/state/tmux/snapshot.log"
+LOGGER = logging.getLogger("tmux_snapshot")
+SAVE_TIMEOUT = 120.0
+LOCK_TIMEOUT = 15.0
+LOCK_PATH = Path(f"/tmp/tmux-dotfiles-snapshot-{os.getuid()}.lock")
 
 
 class SnapshotError(RuntimeError):
     pass
 
 
+class SnapshotBusy(SnapshotError):
+    pass
+
+
 def run(
-    args: List[str], timeout: float = 60.0
+    args: List[str], timeout: float = 60.0, env: Optional[Dict[str, str]] = None
 ) -> subprocess.CompletedProcess[str]:
-    try:
-        return subprocess.run(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise SnapshotError(f"command timed out: {' '.join(args)}") from error
+    # Resurrect forks pipelines. Killing only its shell leaves writers running
+    # after the save lock has been released.
+    with subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        start_new_session=True,
+        env=env,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(process.pid, sig)
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    # macOS can report EPERM for a group containing only dead
+                    # children after TERM. A still-running leader is an error.
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate(timeout=5.0)
+                        raise
+                if sig == signal.SIGTERM:
+                    time.sleep(0.1)
+            stdout, stderr = process.communicate(timeout=5.0)
+            LOGGER.error("timeout after %.1fs: %s", timeout, " ".join(args))
+            raise SnapshotError(f"command timed out: {' '.join(args)}") from error
+        return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
 
 
 def tmux(args: List[str], timeout: float = 10.0) -> subprocess.CompletedProcess[str]:
@@ -82,7 +118,9 @@ def topology_from_tmux() -> Dict[str, object]:
     return {
         "sessions": sessions,
         "session_count": len(sessions),
-        "window_count": len([line for line in windows_result.stdout.splitlines() if line]),
+        "window_count": len(
+            [line for line in windows_result.stdout.splitlines() if line]
+        ),
         "pane_count": len([line for line in panes_result.stdout.splitlines() if line]),
     }
 
@@ -127,7 +165,7 @@ def resolve_last() -> Path:
     return snapshot
 
 
-def validate_archive(path: Path) -> None:
+def validate_archive(path: Path, required: Optional[Set[str]] = None) -> None:
     if not path.is_file() or path.stat().st_size == 0:
         raise SnapshotError("pane scrollback archive was not created")
     try:
@@ -135,11 +173,21 @@ def validate_archive(path: Path) -> None:
             members = archive.getmembers()
     except (OSError, tarfile.TarError) as error:
         raise SnapshotError("pane scrollback archive is corrupt") from error
-    if not any(member.isfile() for member in members):
+    saved = {
+        Path(member.name).name
+        for member in members
+        if member.isfile() and Path(member.name).name.startswith("pane-")
+    }
+    if not saved:
         raise SnapshotError("pane scrollback archive contains no pane data")
+    missing = (required or set()) - saved
+    if missing:
+        raise SnapshotError("pane scrollback missing: " + ", ".join(sorted(missing)))
 
 
-def validate_snapshot(snapshot: Path, expected: Dict[str, object]) -> Dict[str, object]:
+def validate_snapshot(
+    snapshot: Path, expected: Dict[str, object], archive: Optional[Path] = None
+) -> Dict[str, object]:
     actual = topology_from_snapshot(snapshot)
     keys = ("session_count", "window_count", "pane_count")
     mismatches = [
@@ -153,33 +201,158 @@ def validate_snapshot(snapshot: Path, expected: Dict[str, object]) -> Dict[str, 
         )
     if mismatches:
         raise SnapshotError("snapshot verification failed: " + "; ".join(mismatches))
-    validate_archive(PANE_ARCHIVE)
+    validate_archive(archive if archive is not None else PANE_ARCHIVE)
     return actual
 
 
 @contextmanager
 def save_lock() -> Iterator[None]:
-    lock_path = Path(f"/tmp/tmux-dotfiles-snapshot-{os.getuid()}.lock")
+    lock_path = LOCK_PATH
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        yield
+        deadline = time.monotonic() + LOCK_TIMEOUT
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise SnapshotBusy(
+                        "another snapshot is still saving; try again shortly"
+                    )
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def save_verified() -> Tuple[Path, Dict[str, object]]:
+    with save_lock():
+        return save_verified_locked()
+
+
+def save_verified_locked() -> Tuple[Path, Dict[str, object]]:
     if not SAVE_SCRIPT.is_file():
         raise SnapshotError(f"tmux-resurrect save script is missing: {SAVE_SCRIPT}")
     expected = topology_from_tmux()
-    with save_lock():
-        result = run([str(SAVE_SCRIPT), "quiet"], timeout=120.0)
+    required = required_scrollback()
+    RESURRECT_DIR.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory(
+        prefix=".pending-", dir=RESURRECT_DIR
+    ) as directory:
+        staging = Path(directory)
+        env = dict(os.environ)
+        # Redirect only this save's directory lookup, not the live server's
+        # @resurrect-dir. All other tmux commands use the original executable.
+        real_tmux = shutil.which("tmux")
+        if real_tmux is None:
+            raise SnapshotError("tmux executable is missing")
+        shim_dir = staging / "bin"
+        shim_dir.mkdir()
+        shim = shim_dir / "tmux"
+        shutil.copyfile(SAVE_TMUX_SHIM, shim)
+        shim.chmod(0o755)
+        env["TMUX_SNAPSHOT_STAGE_DIR"] = str(staging)
+        env["TMUX_SNAPSHOT_TMUX"] = real_tmux
+        env["COPYFILE_DISABLE"] = "1"
+        env["PATH"] = f"{shim_dir}{os.pathsep}{env.get('PATH', os.defpath)}"
+        env.pop("_RESURRECT_DIR", None)
+        env.pop("_RESURRECT_FILE_PATH", None)
+        args = [str(SAVE_SCRIPT), "quiet"]
+        if Path("/usr/bin/caffeinate").is_file():
+            args = ["/usr/bin/caffeinate", "-i", *args]
+        LOGGER.info("save started: %s", expected)
+        try:
+            result = run(args, timeout=SAVE_TIMEOUT, env=env)
+        except SnapshotError:
+            phase = "scrollback" if (staging / "last").exists() else "layout"
+            LOGGER.exception(
+                "save failed in %s after %.1fs", phase, time.monotonic() - started
+            )
+            raise
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip().splitlines()
             raise SnapshotError(
                 f"tmux-resurrect save failed: {detail[-1] if detail else result.returncode}"
             )
-        snapshot = resolve_last()
-        actual = validate_snapshot(snapshot, expected)
+        try:
+            staged_layout = (staging / "last").resolve(strict=True)
+        except OSError as error:
+            raise SnapshotError(
+                "save produced no staged layout; previous snapshot kept"
+            ) from error
+        if staged_layout.parent != staging:
+            raise SnapshotError(
+                "save escaped its staging directory; previous snapshot kept"
+            )
+        staged_archive = staging / PANE_ARCHIVE.name
+        actual = validate_snapshot(staged_layout, expected, staged_archive)
+        validate_archive(staged_archive, required)
+        if topology_from_tmux() != expected:
+            raise SnapshotError(
+                "tmux layout changed during save; previous snapshot kept; retry"
+            )
+
+        snapshot = RESURRECT_DIR / staged_layout.name
+        if snapshot.exists():
+            raise SnapshotError("snapshot timestamp collision; retry shortly")
+        old_archive = staging / "previous-archive"
+        if PANE_ARCHIVE.is_file():
+            os.link(PANE_ARCHIVE, old_archive)
+        temporary_link = staging / "next-last"
+        temporary_link.symlink_to(snapshot.name)
+        staged_layout.replace(snapshot)
+        try:
+            staged_archive.replace(PANE_ARCHIVE)
+            temporary_link.replace(LAST_LINK)
+        except OSError:
+            if old_archive.exists():
+                old_archive.replace(PANE_ARCHIVE)
+            else:
+                PANE_ARCHIVE.unlink(missing_ok=True)
+            snapshot.unlink(missing_ok=True)
+            raise
+    LOGGER.info("save verified in %.2fs: %s", time.monotonic() - started, snapshot.name)
+    try:
+        prune_layouts(snapshot)
+    except (OSError, ValueError, SnapshotError):
+        LOGGER.exception("saved successfully, but old layout cleanup failed")
     return snapshot, actual
+
+
+def required_scrollback() -> Set[str]:
+    result = tmux(
+        [
+            "list-panes",
+            "-a",
+            "-F",
+            "#{session_name}:#{window_index}.#{pane_index}\t#{history_size}\t#{cursor_y}",
+        ]
+    )
+    if result.returncode != 0:
+        raise SnapshotError("cannot inspect pane scrollback before saving")
+    required = set()
+    for line in result.stdout.splitlines():
+        name, history, cursor = line.split("\t")
+        if int(history) > 0 or int(cursor) > 0:
+            required.add(f"pane-{name}")
+    return required
+
+
+def prune_layouts(current: Path) -> None:
+    result = tmux(["show-option", "-gqv", "@resurrect-delete-backup-after"])
+    days = int(result.stdout.strip() or "30")
+    cutoff = time.time() - days * 86400
+    files = sorted(
+        RESURRECT_DIR.glob("tmux_resurrect_*.txt"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for path in files[5:]:
+        if path != current and path.stat().st_mtime < cutoff:
+            path.unlink()
 
 
 def sha256(path: Path) -> str:
@@ -248,8 +421,9 @@ def write_checkpoint(
 
 
 def command_checkpoint(label: str, quiet: bool) -> int:
-    snapshot, topology = save_verified()
-    target = write_checkpoint(snapshot, topology, label, include_archive=True)
+    with save_lock():
+        snapshot, topology = save_verified_locked()
+        target = write_checkpoint(snapshot, topology, label, include_archive=True)
     notify(
         "tmux checkpoint saved"
         f" · {topology['session_count']} sessions"
@@ -264,7 +438,10 @@ def command_checkpoint(label: str, quiet: bool) -> int:
 
 
 def command_quiet_save() -> int:
-    save_verified()
+    try:
+        save_verified()
+    except SnapshotBusy:
+        LOGGER.info("automatic save skipped: another snapshot is saving")
     return 0
 
 
@@ -363,6 +540,13 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: List[str]) -> int:
     args = parser().parse_args(argv[1:])
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(
+        LOG_PATH, maxBytes=512_000, backupCount=2, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    LOGGER.addHandler(handler)
+    LOGGER.setLevel(logging.INFO)
     try:
         if args.command == "checkpoint":
             return command_checkpoint(args.label, args.quiet)
@@ -375,6 +559,7 @@ def main(argv: List[str]) -> int:
         if args.command == "prepare":
             return command_prepare(args.checkpoint)
     except (OSError, ValueError, json.JSONDecodeError, SnapshotError) as error:
+        LOGGER.exception("snapshot command %s failed", args.command)
         message = f"tmux snapshot failed · {error}"
         if os.environ.get("TMUX"):
             run([str(NOTICE_SCRIPT), "show", "error", "6", message], timeout=4.0)

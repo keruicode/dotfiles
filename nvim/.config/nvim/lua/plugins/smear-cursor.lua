@@ -1,6 +1,7 @@
 return {
   {
     "sphamba/smear-cursor.nvim",
+    enabled = vim.env.SSH_CONNECTION == nil and vim.env.SSH_TTY == nil,
     opts = {
       -- 官方 "Faster smear" 配置
       stiffness = 0.8, -- 默认 0.6

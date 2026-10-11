@@ -1,15 +1,13 @@
 # Codex Resume: Tmux、Codex 与终端工作流
 
-恢复命令：
+线程 ID：019f3c6f-d910-7183-b5e4-3b95f53ba179
 
-```bash
-codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
-```
-
-如果本机别名写成 `code resume`，使用同一个编号：
+会话日志：/Users/xiaoxiaotu/.codex/sessions/2026/07/07/rollout-2026-07-07T19-56-30-019f3c6f-d910-7183-b5e4-3b95f53ba179.jsonl
+工作目录：/Users/xiaoxiaotu/dotfiles
 
 ```bash
 code resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
 ```
 
 当前 thread ID：
@@ -42,6 +40,233 @@ tmux/.config/tmux/
 ```text
 /Users/xiaoxiaotu/dotfiles/tmux/README.md
 ```
+
+## 当前续接状态（2026-09-23）：U盘已弹出，补齐快捷键登记
+
+线程 ID、续接命令、会话日志和工作目录沿用本文顶部记录。
+
+目标不是 storage，而是 `/Volumes/U盘`，4 GB ExFAT，卷 UUID
+`58018CCC-62E3-3349-BE30-E96361476D4E`，当时为 `disk4s1`。
+原多卷入口只枚举 storage/linux/tutu，未处理此设备；另外 SR 的 `%44` 有两层旧
+`Yazi -> S shell`，`%45` 也是盘内空闲 shell。Quick Look 还映射着盘内一份 PDF。
+
+本轮改动：
+
+- 新增 `tmux/.config/tmux/external-workspaces/usb.json`，按上述 UUID 登记 U盘，使用 SR
+  session、空固定 pane 列表；实际路径由运行状态记录。
+- `external_workspaces_all.py` 将 `usb.json` 加入 eject/restore 枚举。
+- `external_workspace.py` 的 `unwind_yazi_subshell()` 改为等待旧前台 PID 退出。
+  原来要求 shell 命令名变成 yazi，但 `ya emit quit` 可直接退到外层同名 Zsh，造成假失败。
+- `tmux/README.md` 更新登记卷、恢复及 Quick Look 边界，同时修正顶部交接链接。
+
+实测：嵌套 Yazi 与 shell 已退出，两个 pane 都回到 Home；
+`~/.local/state/tmux/usb-workspace.json` 为 `parked=true`，保留 `[tmux]:1/2` 的目录，
+第一个 pane 的恢复标记为 yazi。首次后端正确拒绝 QuickLook 占用，直接普通
+`diskutil eject disk4` 也失败。确认 PID 15235 是系统 QuickLookUIService、没有可见
+预览窗口且仅只读映射 PDF 后，TERM 无效，最终仅对该 PID 发 KILL 释放缓存；没有关闭
+其他应用，没有 force unmount。再次执行快捷键同一后端返回：
+
+```text
+external eject complete · storage, linux, tutu, usb
+exit_code=0
+```
+
+复核 `diskutil list external physical` 已无设备。验证已通过：两个脚本 `py_compile`、
+USB JSON 解析、mock 检查旧 PID 退出/仍存活/非空闲子 shell 三条路径、`git diff --check`。
+未执行全仓格式化；未在弹出后重新挂载复测 C-s I，以免再次占用待拔设备。
+
+已知边界：Quick Look 清理由本次人工核实后执行，并未加入自动杀进程逻辑；若以后残留，
+脚本仍会保守报 busy。未知 U 盘不在登记列表内。多个配置目前仍共用 storage 命名的日志
+及互斥锁，后续可单独改进，不能把旧日志当成当前故障。下次插回本设备后可按 C-s I
+恢复仍保留的 SR pane。最终答复置顶保存到 `tmp/tmux_外接盘安全弹出.md`。
+
+## 当前续接状态（2026-09-18）：storage 已成功退出
+
+本轮恢复命令和会话日志沿用本文顶部记录。工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+用户请求推出 storage。执行前确认 `/Volumes/storage` 已挂载为 `disk6s2`，`lsof` 没有
+返回占用进程。随后执行与 tmux `C-s U` 完全相同的
+`python3 ~/.config/tmux/scripts/external_workspaces_all.py eject`，输出
+`external eject complete · storage, linux, tutu`，`eject_result=0`；复核挂载点已经消失，
+可以安全拔出。本次没有修改代码。最终答复已置顶写入
+`tmp/tmux_外接盘安全弹出.md`。
+
+## 当前续接状态（2026-09-16）：修复 `unzip archive.zip -x` 的条目补全
+
+本轮恢复命令和会话日志沿用本文顶部记录。工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+用户反馈 `unzip -x` 后按 Tab 无法补全。根因是 macOS zsh 没有独立 `_unzip`，命令被
+映射到通用 `_zip`；系统函数把 `-x` 后参数视为自由 glob pattern，而不是 zip 内条目。
+
+已在 `zsh/.config/zsh/aliases.zsh` 增加 `_unzip_with_entries`。当命令为
+`unzip archive.zip -x <Tab>`（或 `--exclude`）时，它定位前置 archive 并通过
+`unzip -Z1 -- archive.zip` 获取条目，以安全的 zsh completion 候选返回；无 archive 时
+补全本地 `.zip`，其他场景继续委托系统 `_zip`。该文件由 `~/.zshrc` 自动 source。
+
+验证：临时 archive 内 `alpha.txt` 与 `nested/beta file.txt` 都被返回；
+`zsh -n aliases.zsh` 与 `git diff --check` 通过。已有 shell 执行一次
+`source ~/.config/zsh/aliases.zsh`，新 terminal/tmux window 自动生效。最终答复已置顶保存到
+`tmp/zsh_补全.md`。
+
+## 当前续接状态（2026-09-16）：`C-s U` 自动清理孤儿扫描并实测弹盘
+
+本轮恢复命令和会话日志沿用本文顶部记录。工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+完成态 Codex 自动收尾已在真实 `C-s U` 中生效，日志记录
+`closed completed Codex pane AOSL.1`。但其后 `lsof` 仍发现 `zsh`、`find`、`head` 占用
+storage。进程树确认这是无 TTY、PPID 为 1 的 `zsh -c find ... | head ...` 孤儿组，来自
+此前被中断的工具检索，不属于 tmux pane 或 Kitty window；旧逻辑因此正确拒绝而未弹盘。
+
+已在 `external_workspace.py` 新增孤儿只读扫描清理，仅匹配完整进程组只含 shell、`find`、
+`head`，leader 无 TTY、父进程已退出，且 shell 参数含 `find ... | head -` 并不含
+`-delete`、`-exec`、`-execdir`、`-ok`、`-okdir`。匹配项发送 `SIGTERM` 后再做原有 `lsof`
+检查；Python、Node、Codex、编辑器、带 TTY 或未知任务一律保留并取消弹盘。
+
+实际验证：弹盘日志显示 `closed disposable orphaned scans=1`，其后 `lsof users=False`，
+`diskutil target=disk4 rc=0`，storage 挂载点消失。静态验证包括 `py_compile`、JSON 解析、
+安全扫描匹配/拒绝 `-delete`/拒绝带 TTY/拒绝 Python 组，以及 `git diff --check`，均通过。
+
+## 当前续接状态（2026-09-16）：完成态 Codex 由 `C-s U` 自动收尾
+
+本轮恢复命令和会话日志沿用本文顶部记录。工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+用户要求修正弹盘代码，使重复发生的“已完成 Codex 仍持有 storage cwd”无需每次人工
+介入。已在 `external_workspace.py` 新增完成态识别：pane 前台进程组必须是 `codex`，且
+连续两次 pane transcript 都包含 `Ask Codex to do anything`，并且该提示后没有
+`Working (` 或 `esc to interrupt`。只有全部条件通过才向该前台进程组发送 `SIGINT`，
+等待 pane 不再是 Codex 后继续原有停车流程。
+
+`storage.json` 已显式启用 `close_completed_codex: true`。运行中、状态不明确或前台不是
+Codex 的 pane 维持 busy 拒绝策略；不会为拔盘强杀任务。`tmux/README.md` 与
+`tmp/tmux_外接盘安全弹出.md` 已同步操作边界。
+
+验证：`python3 -m py_compile external_workspace.py`、storage JSON 解析、完成提示/活动提示
+判定以及 SIGINT 仅指向已验证前台进程组的隔离测试、`git diff --check` 均通过。实际弹盘
+结果仍以底栏显示 `external eject complete` 和挂载点消失为准；重新插入后使用 `C-s I`。
+
+## 当前续接状态（2026-09-16）：`C-s U` 已确认成功退出 storage
+
+本轮恢复命令和会话日志沿用本文顶部记录。工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+用户报告 `C-s U` 再次未能弹出 storage。现场确认 live binding 仍为
+`python3 ~/.config/tmux/scripts/external_workspaces_all.py eject || true`，脚本确实被触发；
+操作日志显示它因 `AOSL.1:codex` 取消。真实对应 pane 为 `4-SR:3.1`：Codex
+`019fc28e-102d-7b12-b93e-6f5dc002b224` 已显示“任务完成 / Ask Codex to do anything”，
+但 CLI、Node 和插件进程的 cwd 仍在 `/Volumes/storage/WORK/SR_论文修改`。
+
+确认无未完成任务后，已向该 Codex 前台进程组发送正常中断，使 pane 返回 zsh；随即运行
+与快捷键完全相同的弹盘后端。结果为 `external eject complete · storage, linux, tutu`，
+`eject_result=0`，且 `/Volumes/storage` 挂载点已消失。硬盘现在可以安全拔出。
+
+结论：快捷键和脚本正常；它拒绝自动终止 Codex 是预期保护。下次在状态通知中看到 Codex
+占用，先确认对应 pane 的任务完成并退出，再重按 `C-s U`。重新插入后按 `C-s I` 恢复。
+操作结论已置顶写入 `tmp/tmux_外接盘安全弹出.md`。
+
+## 当前续接状态（2026-09-15）：完成态 Codex 占用 storage 已处理
+
+本轮恢复命令和会话日志沿用本文顶部记录。工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+用户反馈 storage 仍不能推出。检查结果表明，阻塞者不是 Kitty：`AOSL.1` 的 Codex
+`019fc28e-102d-7b12-b93e-6f5dc002b224` 已显示任务完成，但仍停留在 Codex 交互界面，
+当前目录为 `/Volumes/storage/WORK/SR_论文修改`。这正是 `C-s U` 应保守拒绝的场景，
+因为脚本不能自行杀掉可能仍在工作的 Codex。
+
+在确认该任务已经完成后，已正常中断该 Codex，使 pane 返回 zsh；再运行与 `C-s U`
+完全相同的 `external_workspaces_all.py eject`，结果为
+`external eject complete · storage, linux, tutu`，`eject_result=0`。随后挂载点已经
+消失，证明 storage 已卸载，可安全拔出。下次若 `C-s U` 指向 Codex，占用 pane 应先确认
+任务完成并退出，然后重按 `C-s U`；重新插入硬盘后按 `C-s I` 恢复。
+
+详细操作说明同步更新至 `tmp/tmux_外接盘安全弹出.md`。本次无需修改弹盘代码。
+
+## 当前续接状态（2026-09-14）：修复 `C-s U` 的 Yazi 按键泄漏并复验弹盘
+
+本轮恢复命令和会话日志沿用本文顶部记录。工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+用户反馈 `C-s U` 再次失败。日志显示脚本在 parking 阶段停止于完成态 Codex 与
+`雾微物理课题.2:yazi-shell`。检查发现 Codex `019fc28e-102d-7b12-b93e-6f5dc002b224`
+已输出任务完成总结，但遗留一个超过 15 小时的 background `find`；该遗留进程和完成态
+Codex 已按用户的弹盘请求结束，pane 返回 zsh。该 Codex 的工作结果已经落盘，恢复命令
+仍见它的 pane scrollback。
+
+真正的脚本缺陷：`stop_yazi()` 原先发送 `Esc` 与 `Q` 再等待退出。Yazi 已退出时，字符
+会落入 Zsh，生成 `Q[` 前缀，导致随后的 `cd /Users/xiaoxiaotu` 报 `bad pattern`，停车
+失败。现已改为只在核实前台 PID 是 Yazi 时发送 `SIGTERM`；同时 `park()` 最多八层递归
+收起空闲的 `Yazi -> S shell` 嵌套。不会再向 shell 注入 `Esc/Q`。
+
+验证：修复后两个残留 pane 已手动恢复至 Home；`lsof /Volumes/storage` 为空。随后执行与
+`C-s U` 完全相同的 `external_workspaces_all.py eject`，输出
+`external eject complete · storage, linux, tutu`，返回码 `0`；`storage` 当前
+`mounted=False parked=True session=4-SR`。硬盘重新插入后按 `C-s I`，按 UUID 自动挂载并
+恢复已保存路径；本轮无法在硬盘已拔出的状态下实测该挂载步骤。完整记录见
+`tmp/tmux_外接盘安全弹出.md`。
+
+## 当前续接状态（2026-09-13）：`C-s U` 清理独立 Kitty 占用并安全弹出 storage
+
+本轮恢复命令和会话日志沿用本文顶部记录。工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+问题：`C-s U` 原本只会停车 `4-SR` 的 tmux pane。三个独立 Kitty OS 窗口仍以
+`/Volumes/storage` 内目录作为 cwd，因此 macOS 提示“kitty 正在使用它”，并拒绝
+推出硬盘。
+
+已修改 `tmux/.config/tmux/scripts/external_workspace.py`：停车并生成 eject checkpoint
+后，从 `lsof` 找到仍占用该卷的 PID，向上定位 Kitty `kitten run-shell` 窗口；仅当其
+完整进程树只包含 shell、Yazi、tmux client，或本地 `/opt/homebrew/bin/iap` 客户端时，
+才按窗口发送 HUP 关闭。检测到 Codex、Python、Node、编辑器或未知命令时会保留窗口
+并取消弹盘。处理 `ps` 输出时已采用 UTF-8 replacement 解码，避免异常参数使脚本中断。
+
+本次预检确认三个 Kitty 窗口均可安全结束，分别为 tmux client、Yazi/S 子 shell、以及
+本地 IAP client；随后实际执行 `external_workspace.py eject`，返回 `0`，storage 已卸载，
+且 `lsof` 无剩余进程。关闭 IAP 只断开本机 SSH client，不会删除远端 IAP tmux 会话。
+
+`C-s I` 逻辑不变：重新接入硬盘后按一次，会按 UUID 挂载 storage、切到 `4-SR` 并恢复
+保存的目录与 Yazi。独立 Kitty 窗口不自动重建，避免再次锁住硬盘。详见
+`tmp/tmux_外接盘安全弹出.md` 与 `tmux/README.md`。
+
+## 当前续接状态（2026-09-12）：Kitty 原生光标轨迹
+
+本轮恢复命令和会话日志沿用本文顶部记录。工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+用户希望在 Kitty 加入跳转时可见的“鼠标闪烁”效果，并要求以 TheNiceBoy 配置为参考。
+已确认目标应为 Kitty 原生的**文本光标轨迹**，而非鼠标指针插件。
+
+已修改：
+
+```text
+kitty/.config/kitty/kitty.conf
+kitty/.config/kitty/README.md
+tmp/kitty_光标轨迹.md
+```
+
+生效参数：
+
+```conf
+cursor_trail 80
+cursor_trail_decay 0.12 0.28
+cursor_trail_start_threshold 2
+cursor_trail_color #88e5f2
+```
+
+已通过本机 Kitty `0.47.2` 的配置解析器验证：
+
+```text
+parsed: cursor_trail=80, decay=(0.12, 0.28), threshold=2
+```
+
+TheNiceBoy 当前 `master` 已拉取至本仓库忽略的 `.tmp/theniceboy-config-20260912`，
+提交为 `e18047a`。其 `kitty/kitty.conf` 没有 cursor trail、鼠标闪烁或 shader；仅可
+作为基础 Kitty/tmux/Dracula 的参考，故未照搬 Linux 路径、字体和主题。上游的鼠标
+spotlight/水波 shader 仍为夜间版/RFC，当前稳定版没有启用。完整结论见
+`tmp/kitty_光标轨迹.md`。
 
 当前配置已包含 tmux base、Colemak 快捷键、session/window/pane 管理、Codex Tasks 面板、Resurrect/Continuum 快照、storage 工作区停车与恢复，以及 IAP 远端 tmux 自动重连。本文后续章节保留各轮历史修改记录；恢复后先读 `tmux/README.md` 和本文最末一节，再继续操作。
 
@@ -2943,3 +3168,1007 @@ git diff --check                                       PASS
 当前状态：迁移和现场链接已完成，WezTerm 会自动重载；本轮改动以
 `Add WezTerm dotfiles and bilingual docs` 创建本地 commit，尚未推送。下一步建议
 在真实窗口中快速检查标签胶囊、背景切换与右键新标签 SSH 域，然后按需推送。
+
+## 2026-08-25：恢复 Yazi `S` 子 shell 的 Conda 左侧提示
+
+### Resume 命令
+
+```bash
+codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+code resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+```
+
+Thread ID：`019f3c6f-d910-7183-b5e4-3b95f53ba179`
+
+Session log：`/Users/xiaoxiaotu/.codex/sessions/2026/07/07/rollout-2026-07-07T19-56-30-019f3c6f-d910-7183-b5e4-3b95f53ba179.jsonl`
+
+工作目录：`/Users/xiaoxiaotu/dotfiles`
+
+### 根因与修复
+
+用户从 `JAS2026` 执行 `ra`，再在 Yazi 中按 `S` 后，左侧 `(JAS2026)` 不再显示。
+真实 TTY 核对证明环境并未丢失：原配置下仍有 `CONDA_DEFAULT_ENV=JAS2026`、正确
+`CONDA_PREFIX`、`CONDA_SHLVL=2`，右侧 Starship 也显示 `via 🅒 JAS2026`。缺失的
+只是 Conda 注入 `PROMPT` 的左侧文本：嵌套 zsh 会继承活跃环境，但 Conda hook
+不会对已经活跃的同一环境再次改写新 Starship prompt。
+
+`yazi/.config/yazi/keymap.toml` 的 `S` 现在额外设置一次性变量
+`YAZI_RESTORE_CONDA_PROMPT=1`。`zsh/.config/zsh/aliases.zsh` 只在该变量存在时注册
+一次性 `precmd` hook；等 `.zshrc` 后面的 Conda 初始化完成后，对当前同名环境执行
+一次 `conda activate`，刷新 prompt 后立即删除 hook 和标记。激活同一环境不会增加
+`CONDA_SHLVL`，普通 zsh 启动完全不受影响。Yazi README 已同步说明。
+
+### 重要文件
+
+```text
+/Users/xiaoxiaotu/dotfiles/yazi/.config/yazi/keymap.toml
+/Users/xiaoxiaotu/dotfiles/zsh/.config/zsh/aliases.zsh
+/Users/xiaoxiaotu/dotfiles/yazi/.config/yazi/README.md
+```
+
+### 验证
+
+真实交互 TTY 执行 `conda activate JAS2026` → `yazi` → `S` 后，首个提示符同时显示
+左侧 `(JAS2026)` 和右侧 `via 🅒 JAS2026`。子 shell 命令级结果：
+
+```text
+E2E=JAS2026|/Users/xiaoxiaotu/opt/anaconda3/envs/JAS2026|2|flag=unset|modifier=(JAS2026)
+```
+
+附加检查：
+
+```text
+zsh -n zsh/.config/zsh/aliases.zsh     PASS
+yazi --debug 读取当前 keymap            PASS
+无一次性变量的普通 zsh                  PASS，未注册恢复 hook
+git diff --check                        PASS
+```
+
+当前状态：修复已通过软链接现场生效；需要完全退出当前旧 Yazi 后重新执行 `ra` 才会
+读取新键位。当前改动尚未提交或推送。
+
+## 2026-08-28：修复 `C-s U` 弹出 storage 的离线状态判断
+
+### Resume 命令
+
+```bash
+codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+code resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+```
+
+Thread ID：`019f3c6f-d910-7183-b5e4-3b95f53ba179`
+
+Session log：`/Users/xiaoxiaotu/.codex/sessions/2026/07/07/rollout-2026-07-07T19-56-30-019f3c6f-d910-7183-b5e4-3b95f53ba179.jsonl`
+
+工作目录：`/Users/xiaoxiaotu/dotfiles`
+
+### 现场诊断
+
+`C-s U` 的有效 tmux binding 一直存在，实际绑定为：
+
+```text
+bind-key -T prefix U run-shell -b "~/.config/tmux/scripts/external_workspace.py eject || true"
+```
+
+`~/.local/state/tmux/storage-operations.log` 证明 2026-08-28 晚间按键已触发：
+
+```text
+23:32  第一次取消：SR pane busy
+23:33  第二次取消：SR pane busy
+23:34  第三次停车、保存快照、lsof 检查完成，13.2 秒后 diskutil rc=0
+```
+
+检查时 `/Volumes/storage` 已不再挂载，`4-SR` 的全部 pane 已停车到
+`/Users/xiaoxiaotu`，没有进程继续持有 storage。物理设备仍列为 `disk6`，storage 为
+`disk6s2`，同盘卷均为 `Mounted: No`。该 Western Digital USB 盘被 macOS 标记为
+固定介质，正常 `diskutil eject disk6` 成功后仍可能出现在
+`diskutil list external physical`；卷均未挂载时可以安全拔线。
+
+### 修复
+
+`external_workspace.py` 现在通过配置中的 storage Volume UUID 解析
+`ParentWholeDisk`，挂载状态下最终弹出父物理盘，而不是把挂载点直接交给
+`diskutil eject`。若 storage 已卸载但设备仍连接，`C-s U` 不再直接返回
+`already offline`，而是继续对父盘执行正常弹出并提示
+`storage ejected · safe to unplug`；设备已断开时也明确提示可安全拔线。
+
+若停车阶段发现 busy pane，具体 `window.pane:command` 会追加进永久操作日志，下一次
+重试成功并清理临时 busy 文件后仍可追查失败原因。README 已补充 10-20 秒等待时间、
+整盘弹出行为和 macOS 固定介质的判断方式。
+
+### 重要文件
+
+```text
+/Users/xiaoxiaotu/dotfiles/tmux/.config/tmux/scripts/external_workspace.py
+/Users/xiaoxiaotu/dotfiles/tmux/README.md
+/Users/xiaoxiaotu/dotfiles/Codex_resume_dotfiles.md
+```
+
+### 验证
+
+```text
+python3 -m py_compile external_workspace.py          PASS
+隔离 mock：mounted / unmounted / disconnected       PASS
+git diff --check                                    PASS
+真实 diskutil eject disk6                           PASS
+tmux run-shell 新入口                               PASS
+底栏通知                                            storage ejected · safe to unplug
+操作日志                                            target=disk6 rc=0
+```
+
+当前状态：storage 及同盘其他卷均已卸载，`4-SR` 已停车，可安全拔线。修复已通过
+`~/.config/tmux` 软链接现场生效，未重载 tmux 也可直接使用。当前修改尚未提交或推送；
+工作树还包含上一轮尚未提交的 Yazi `S` / Conda prompt 修复，不能误删或回退。
+
+## 2026-08-30：修复多个 IAP 实例每隔数秒互相断开重连
+
+### Resume 命令
+
+```bash
+codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+code resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+```
+
+Thread ID：`019f3c6f-d910-7183-b5e4-3b95f53ba179`
+
+Session log：`/Users/xiaoxiaotu/.codex/sessions/2026/07/07/rollout-2026-07-07T19-56-30-019f3c6f-d910-7183-b5e4-3b95f53ba179.jsonl`
+
+工作目录：`/Users/xiaoxiaotu/dotfiles`
+
+### 根因
+
+VPN 路由正常经过 `utun6`，`10.64.201.2:22` 连通，Tunnelblick 状态为
+`CONNECTED`，OpenVPN 日志没有同一时段的 TLS timeout 或重连。IAP pane 的历史输出
+反复出现：
+
+```text
+[detached]
+Connection to 10.64.201.2 closed.
+IAP disconnected (ssh exit 0); reconnecting in 3s.
+```
+
+因此不是链路中断。login02 使用 tmux 1.8；当远端只有 `iap-2` 而 `iap` 不存在时，
+`tmux has-session -t iap` 会按前缀错误匹配 `iap-2`。第一个本地 wrapper 误以为
+`iap` 已存在，随后 `attach-session -d -t iap` 实际也 attach 到 `iap-2`；第二个
+wrapper 本来就连接 `iap-2`。两条 SSH 因而每隔数秒通过 `-d` 互相踢下，均正常
+退出为 0，再被本地三秒重连循环拉起。
+
+远端实测证据：修复前 `tmux display-message -t iap '#S'` 返回 `iap-2`，远端 session
+列表只有 `$6 iap-2`，client 的 `/dev/pts/42` 与 `/dev/pts/156` 交替附着。
+
+### 修复
+
+`iap_remote_tmux.sh` 不再使用 tmux 1.8 的模糊 `has-session -t` 判断，而是先运行
+`tmux list-sessions -F '#S' | grep -Fqx "$remote_session"` 做完整名称匹配；缺少精确
+session 时先创建，再 attach。README 已记录 tmux 1.8 前缀匹配陷阱，以及
+`[detached] + exit 0` 与真实 SSH 网络故障的区别。
+
+为即时停止互踢，已在远端保留原 `$6 iap-2` 的同时补建 `$7 iap`。两个当前 wrapper
+随后自动分别附着到 `iap-2` 和 `iap`，没有杀远端任务或清空历史。
+
+### 重要文件
+
+```text
+/Users/xiaoxiaotu/dotfiles/tmux/.config/tmux/scripts/iap_remote_tmux.sh
+/Users/xiaoxiaotu/dotfiles/tmux/README.md
+/Users/xiaoxiaotu/dotfiles/Codex_resume_dotfiles.md
+```
+
+### 验证
+
+```text
+route -n get 10.64.201.2                         utun6，PASS
+nc -G 5 -vz 10.64.201.2 22                      PASS
+Tunnelblick/OpenVPN                              CONNECTED，无重连
+bash -n iap_remote_tmux.sh                       PASS
+git diff --check                                 PASS
+活跃脚本软链接                                   PASS
+稳定性观察 84 秒                                 两个 SSH PID 未变化
+远端 session/client                              iap 与 iap-2 各 1 个
+```
+
+`shellcheck` 本机未安装，因此未执行。当前连接已经稳定；两个 wrapper 是修复前启动的
+旧 shell，但因为精确的 `iap` session 已存在，当前和后续网络重连不会再误匹配。
+下次正常退出并重新运行 `iap` 时会完整加载新脚本。改动尚未提交或推送，工作树还包含
+此前未提交的 storage 与 Yazi/Conda 修复，不能回退这些用户需要的修改。
+
+## 2026-09-02：IAP LazyVim 同步（已完成）
+
+### Resume 命令
+
+```bash
+codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+code resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+```
+
+Thread ID：`019f3c6f-d910-7183-b5e4-3b95f53ba179`
+
+Session log：`/Users/xiaoxiaotu/.codex/sessions/2026/07/07/rollout-2026-07-07T19-56-30-019f3c6f-d910-7183-b5e4-3b95f53ba179.jsonl`
+
+工作目录：`/Users/xiaoxiaotu/dotfiles`
+
+### 环境结论
+
+IAP wrapper source `/data1/elpt_2022_00083/kerui/.bashrc.minkerui` 后会把 `HOME`
+设置为该数据目录。因此目标 `~/.config/nvim` 是
+`/data1/elpt_2022_00083/kerui/.config/nvim`，没有写入账号原始 Home
+`/public/home/elzd_2023_00026`。
+
+用户记忆中的主机实际是 `server02`，不是 `service02` 或 `serverce02`。通过现有
+`ssh_service02.exp` 已确认 `server02` 与 login02 共享 `/data1`，但清洁环境下的
+GitHub curl/git 测试仍然超时。因此配置、插件和工具由 Mac 下载后经 IAP 传输，
+不依赖远端访问 GitHub。
+
+### 已部署内容
+
+远端 CentOS 7 / glibc 2.17 使用 Neovim 0.12.2 的 glibc 2.17 兼容构建：
+
+```text
+~/software/nvim-linux-x86_64-v0.12.2
+```
+
+`.bashrc.minkerui` 已设置 XDG 目录、PATH，并将 `vi`/`vim` 指向 `nvim`。旧的
+`~/software/nvim-linux64/bin/nvim` 也已改为指向新版本的软链接，因此旧 IAP pane
+里原有的 `vim` alias 可立即使用；旧 pane 若要直接使用 `nvim`，执行一次：
+
+```bash
+source ~/.bashrc.minkerui
+```
+
+Mac 的 LazyVim 配置和锁定插件已同步至：
+
+```text
+/data1/elpt_2022_00083/kerui/.config/nvim
+/data1/elpt_2022_00083/kerui/.local/share/nvim/lazy
+```
+
+同时安装了 `rg 15.1.0`、`fd 10.3.0`、`fzf 0.67.0` 和 `latexmk 4.86a` 到
+`~/.local/bin`。远端禁用 Skim/WezTerm GUI 联动、smear-cursor、Mason、Treesitter
+自动下载和 Lazy 更新检查；Blink 使用 Lua matcher。VimTeX 和 latexmk 编译保留。
+
+从 Mac 继续同步配置或连同插件：
+
+```bash
+~/.config/nvim/scripts/sync-iap.sh
+~/.config/nvim/scripts/sync-iap.sh --plugins
+~/.config/nvim/scripts/sync-iap.sh --dry-run
+```
+
+### 备份
+
+```text
+/data1/elpt_2022_00083/kerui/.config/nvim.backup-20260902T131422
+/data1/elpt_2022_00083/kerui/.local/share/nvim.backup-20260902T131422
+/data1/elpt_2022_00083/kerui/.bashrc.minkerui.bak-20260902T131422-lazyvim
+/data1/elpt_2022_00083/kerui/software/nvim-linux64/bin/nvim-v0.4.3
+```
+
+### 重要文件
+
+```text
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/lua/config/lazy.lua
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/lua/config/options.lua
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/lua/config/autocmds.lua
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/lua/config/keymaps.lua
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/lua/plugins/iap.lua
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/lua/plugins/smear-cursor.lua
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/scripts/sync-iap.sh
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/README.md
+```
+
+### 验证
+
+```text
+bash -n sync-iap.sh                              PASS
+本机 Neovim headless                             PASS
+远端 Neovim                                     NVIM v0.12.2
+远端 stdpath("config")                           /data1/.../kerui/.config/nvim
+远端 headless 启动及错误扫描                     PASS
+远端临时 tmux 内实际打开 LazyVim                 PASS
+VimTeX 加载                                      PASS
+最小 LaTeX -> PDF 编译                           PASS（1 页，13092 bytes）
+远端 AppleDouble `._*` 文件检查                  PASS（0 个）
+git diff --check                                 PASS
+```
+
+远端首次插件同步后已按插件 HEAD 和 headless 启动验证。额外的逐文件 checksum rsync
+因 `/data1` 共享盘读取超过一分钟而主动终止，仅终止本次校验进程，没有影响 IAP tmux
+会话或远端任务。当前 LazyVim 同步已完成，修改尚未提交或推送。
+
+## 2026-09-03：Kitty 纳入 dotfiles 并对齐 WezTerm
+
+### Resume 命令
+
+```bash
+codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+code resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
+```
+
+Thread ID：`019f3c6f-d910-7183-b5e4-3b95f53ba179`
+
+Session log：`/Users/xiaoxiaotu/.codex/sessions/2026/07/07/rollout-2026-07-07T19-56-30-019f3c6f-d910-7183-b5e4-3b95f53ba179.jsonl`
+
+工作目录：`/Users/xiaoxiaotu/dotfiles`
+
+### 修改
+
+Kitty 0.47.2 已安装，`~/.config/kitty` 原本就正确软链接到
+`~/dotfiles/kitty/.config/kitty`，但根 `.gitignore` 曾忽略整个 `kitty` 包。现已移除
+该忽略规则，使 Kitty 配置可以进入版本管理。
+
+`kitty.conf` 已按当前 WezTerm 配置重写：JetBrains Mono 26pt、LXGW WenKai Mono
+中文回退、Symbols Nerd Font Mono 图标、Nebula 配色、顶部紧凑 powerline 标签、
+Colemak `u/e/n/i` 窗格导航、100 万行回滚历史，以及适合 Yazi/Lazygit/LazyVim/tmux
+阅读的 `0.96` 轻微透明和 20px macOS blur。没有加入背景图，也不再使用原先过度透明
+的 `0.56` 设置。
+
+主题由 `neo-mocha.conf` 改为 `nebula.conf`，颜色值与
+`wezterm/.config/wezterm/colors/custom.lua` 对齐。`tab_bar.py` 修复路径截断先于程序
+识别的问题，现在 Codex、Yazi、Lazygit 能显示正确语义图标和简短标题。
+
+为防止从 tmux/Codex shell 启动 Kitty 时继承污染，Kitty 初始 child environment 会
+移除 `TMUX`、`TMUX_PANE` 和 `NO_COLOR`，并明确设置 `TERM_PROGRAM=kitty`、
+`COLORTERM=truecolor`、`CLICOLOR=1`。这避免新 Kitty 误连父 tmux，或 Yazi/Lazygit
+再次失去颜色。
+
+根中英文 README 已增加 Kitty 包、Homebrew 安装和 Stow 命令；Kitty 目录新增独立
+中文 README 和完整快捷键表。
+
+### 重要文件
+
+```text
+/Users/xiaoxiaotu/dotfiles/.gitignore
+/Users/xiaoxiaotu/dotfiles/README.md
+/Users/xiaoxiaotu/dotfiles/README_cn.md
+/Users/xiaoxiaotu/dotfiles/kitty/.config/kitty/kitty.conf
+/Users/xiaoxiaotu/dotfiles/kitty/.config/kitty/nebula.conf
+/Users/xiaoxiaotu/dotfiles/kitty/.config/kitty/tab_bar.py
+/Users/xiaoxiaotu/dotfiles/kitty/.config/kitty/README.md
+/Users/xiaoxiaotu/dotfiles/Codex_resume_dotfiles.md
+```
+
+### 验证
+
+```text
+Kitty 0.47.2 load_config                         BAD_LINES 0
+实际字体                                         JetBrains Mono 26.0
+实际前景/背景                                    #f8f8f2 / #282a36
+实际透明度                                       0.96
+隐藏 Kitty 实例及 remote-control 状态            PASS
+child env 清理                                   无 TMUX/TMUX_PANE/NO_COLOR
+child true color                                 xterm-kitty / truecolor
+Codex/Yazi/Lazygit 标签渲染                      PASS
+python3 -m py_compile tab_bar.py                 PASS
+stow --simulate --verbose kitty                  PASS
+git diff --check                                 PASS
+```
+
+Computer Use 因安全策略不允许读取 `net.kovidgoyal.kitty`，因此没有自动截图目检；
+隐藏实例、有效颜色、环境和配置解析均已验证，测试实例已退出。Kitty 配置与本轮其他
+工作树改动尚未提交或推送。
+
+### 2026-09-03 字体修正
+
+用户实际打开 Kitty 后指出字体不对。检查确认 WezTerm 使用应用内置的
+`JetBrains Mono DemiBold`，而 macOS 当时只有单个旧版 `JetBrainsMono-Regular.ttf`；
+Kitty 因而只能使用 Regular，与 WezTerm 字重不一致。
+
+已安装 Homebrew `font-jetbrains-mono 2.304` 完整字体族，并将原有 Regular 文件备份
+到以下忽略目录，未删除：
+
+```text
+/Users/xiaoxiaotu/dotfiles/.tmp/font-backup/JetBrainsMono-Regular.pre-homebrew-20260903.ttf
+SHA-256 50e1dcb40298fcfcc21a1ef3cbee9fe9e82709c48ad30ce617472c06a3bd9436
+```
+
+Kitty 现在精确绑定：
+
+```text
+Normal       JetBrainsMono-SemiBold
+Bold         JetBrainsMono-Bold
+Italic       JetBrainsMono-SemiBoldItalic
+Bold-Italic  JetBrainsMono-BoldItalic
+Chinese      LXGWWenKaiMono-Medium
+Symbols      SymbolsNerdFontMono-Regular
+```
+
+`kitty.conf` 的四种英文字形通过 PostScript 名指定。中文 `symbol_map` 不能使用
+`postscript_name=` 规格，已改用 CoreText 注册的完整名称 `LXGW WenKai Mono Medium`；
+隐藏 Kitty 的 `--debug-font-fallback` 实际渲染确认对应文件为
+`LXGWWenKaiMono-Medium.ttf`，没有回退到 Menlo。根中英文 README 和 Kitty README
+已经补充 `font-jetbrains-mono` 安装依赖。
+
+验证：Kitty `load_config` 为 `BAD_LINES 0`，Homebrew 字体版本 2.304，四个英文 face、
+中文 Medium 和 Nerd Font symbol map 均由 Kitty 运行日志确认，`git diff --check` 通过。
+
+## 2026-09-03：IAP LazyVim 配色与启动延迟
+
+用户反馈 IAP/login03 中 LazyVim 配色异常且打开很慢。网络检查正常：
+`10.64.201.2` 路由经 `utun6`，SSH 22 端口可达。现场确认远端仍是 tmux 1.8，pane
+实际为 `screen`/`screen-256color`，但 IAP wrapper 和 `.bashrc.minkerui` 都设置了
+`COLORTERM=truecolor`；TokyoNight 只输出 RGB 高亮，没有可供旧 tmux 使用的 cterm
+颜色，因此终端能力声明与实际链路不匹配。
+
+已完成以下修复：
+
+- `lua/config/options.lua` 在 SSH/IAP 环境关闭 `termguicolors`，不影响 Mac 本机。
+- 远端 ShaDa 改为各节点本地 `/tmp/nvim-$USER-$HOSTNAME/shada/main.shada`，避免多个
+  IAP Neovim 争用 ParaStor 上同一文件并触发 `E886`；项目、undo、swap、session 仍
+  保留在原位置。
+- `lua/plugins/iap.lua` 在远端把 LazyVim 主题切换为内置 `habamax`；本机继续使用
+  `tokyonight-moon`。
+- `lua/plugins/vim-ncl.lua` 改为仅在 `ncl` filetype 加载。
+- `lua/config/lazy.lua` 在远端额外禁用不需要的 `matchit`、`matchparen` 和
+  `netrwPlugin` runtime plugin。
+- `iap_remote_tmux.sh` 不再向 tmux 1.8 注入伪 truecolor，远端 tmux 全局环境移除
+  `COLORTERM`，并继续移除 `NO_COLOR`。
+- login02/login03 共用的 `/data1/elpt_2022_00083/kerui/.bashrc.minkerui` 已同步修改：
+  历史 pane 的 `TERM=screen` 自动升级为 `screen-256color`，`screen*`/`tmux*` 环境
+  移除 `COLORTERM`，普通现代 256 色终端仍可保留 truecolor。修改前备份为
+  `.bashrc.minkerui.bak-20260903-iap-colors`。
+- Mac 的 Neovim 配置已通过 `~/.config/nvim/scripts/sync-iap.sh` 同步到 `/data1`。
+
+启动慢的主要原因不是 `.bashrc.minkerui` 配色代码。`/data1` 是使用率约 94% 的
+ParaStor，共享盘冷读大量插件小文件较慢；科研 module 栈本身约需 2.5 秒，但为避免
+改变 ROCm、Intel、MPI、NCL、WRF 环境而保留。完整插件树复制到 `/tmp` 超过 90 秒，
+已终止该无效方案并仅清理本次测试目录。
+
+验证结果：
+
+```text
+login03 TERM/COLORTERM                 screen-256color / unset
+LazyVim theme/termguicolors            habamax / false
+Normal cterm foreground/background     251 / 234
+login03 缓存后启动                     0.15-0.18 s
+全新缓存首次启动                       2.46 s
+login02/login03 ShaDa                  各自位于节点本地 /tmp
+两节点各连续启动 5 次                  PASS，无 E886
+vim-ncl plain/NCL buffer               未加载 / 按需加载
+Mac theme/termguicolors                tokyonight-moon / true
+sync-iap.sh 远端 headless 校验          PASS
+bash -n iap_remote_tmux.sh             PASS
+Lua 配置 loadfile                      PASS
+```
+
+并行运行 login02/login03 headless 校验时曾复现一次
+`E886: System error while reading integer from ShaDa file`。现场
+`~/.local/state/nvim/shada/main.shada` 仍存在且可读，根因是多个节点共享同一 ShaDa
+文件的替换竞争，不是项目内容丢失。切换到节点本地 ShaDa 后，login02 与 login03
+并发各启动/退出 5 次均无报错；原共享 ShaDa 未删除，作为历史备份保留。
+
+当前正在运行的 Neovim 不会自动切换主题，需正常退出后重新运行 `nvim`。旧 shell 中
+残留的 `COLORTERM=truecolor` 不再影响 Neovim，因为远端配置会明确关闭
+`termguicolors`；若旧 shell 仍为 `TERM=screen`，执行一次
+`source ~/.bashrc.minkerui`，新建或重连的 login03 shell 会自动得到完整修复环境。
+
+## 2026-09-03：IAP 默认切换为零插件轻量 Neovim
+
+用户实机截图确认，即使将完整 LazyVim 降为 256 色，lualine、折叠、Markdown
+渲染和大量高亮在旧 tmux 1.8 中仍然视觉杂乱，交互也明显卡顿。没有退回远端系统旧
+Vim；保留 Neovim 0.12.2，并新增独立 `NVIM_APPNAME=nvim-iap` 零插件配置。
+
+默认命令：
+
+```text
+nvim / vim / vi / nvim-lite   -> ~/.config/nvim-iap（零插件）
+nvim-lazy                     -> ~/.config/nvim（完整 LazyVim 备用）
+```
+
+轻量配置使用内置 `retrobox` 256 色、原生 filetype/syntax、简单单行 statusline，关闭
+conceal、fold、inlay hints、LSP、Treesitter、补全和插件管理器。保留 Colemak
+`u/e/n/i`、`U/E/N/I`、`k/K` 插入、`l` 撤销、`=/-` 搜索、`S/Q`、四向分屏、
+`Space w...` 窗口跳转，以及 Python/Shell/NCL/LaTeX 的 `r` 保存运行。
+
+新增/修改：
+
+```text
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim-iap/init.lua
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/scripts/nvim-iap
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/scripts/sync-iap.sh
+/Users/xiaoxiaotu/dotfiles/nvim/.config/nvim/README.md
+/data1/elpt_2022_00083/kerui/.bashrc.minkerui
+```
+
+`sync-iap.sh` 现在同时 rsync `~/.config/nvim` 和 `~/.config/nvim-iap`，并用轻量配置做
+远端 headless 校验。远端 bashrc 修改前备份为
+`.bashrc.minkerui.bak-20260903-iap-light`。完整 LazyVim 配置和插件未删除。
+
+login03 验证：
+
+```text
+config                         /data1/elpt_2022_00083/kerui/.config/nvim-iap
+theme / plugins                retrobox / 0
+Colemak u / fold               k / false
+连续启动                       0.12, 0.31, 0.12, 0.12, 0.14 s
+本机同配置启动                 0.02 s
+Markdown conceal/fold/Lazy     0 / false / 0
+nvim-lazy 配置/Lazy 命令        ~/.config/nvim / available
+sync-iap.sh                    PASS
+git diff --check               PASS
+```
+
+当前已经打开的 login03 shell 需执行一次 `source ~/.bashrc.minkerui` 才会刷新 alias；
+不希望重新加载 module/Conda 时，可直接运行 `~/.config/nvim/scripts/nvim-iap <file>`。
+
+补充：截图显示当前仍由旧 shell 的完整 LazyVim 启动，并且远端 `tmux capture-pane`
+确认屏幕网格本身已出现交叠，不是 WezTerm 截图问题。完整配置的 `init.lua` 已加入
+IAP 入口保护：`SSH_CONNECTION`/`SSH_TTY` 存在且 `NVIM_APPNAME` 未明确设为 `nvim` 时，
+会直接 `dofile ~/.config/nvim-iap/init.lua` 后返回，不初始化 Lazy。这样旧 shell 即使
+未 source 新 bashrc，下一次普通 `nvim` 也会自动进入轻量版；`nvim-lazy` 仍显式请求
+完整配置。
+
+远端实际验证：直接运行旧 Neovim 二进制且不设置 `NVIM_APPNAME` 时，输出为
+`theme=retrobox lazy=0 conceal=0 fold=false`；显式 `NVIM_APPNAME=nvim` 时
+`:Lazy` 仍可用。轻量配置在 `VimEnter` 额外执行 `redraw!`，保证从当前已损坏的
+完整 LazyVim 退出后，嵌套 tmux 获得一次完整屏幕重绘。
+
+## 2026-09-08：Yazi shell 不再默认占用外接盘
+
+恢复命令与会话日志沿用本文顶部的 thread ID 和路径；工作目录仍为
+`/Users/xiaoxiaotu/dotfiles`。
+
+问题根因：`yazi/.config/yazi/keymap.toml` 的 `S` 原本以 `--block` 启动交互式
+`$SHELL`。当 Yazi 位于 `/Volumes/storage/...`，这个子 shell 的当前工作目录会被
+macOS 视为对该卷的占用；在 shell 未退出或其前台任务仍运行时，tmux `C-s U` 不应
+强制结束它，因此弹盘会失败。
+
+已修改：
+
+```text
+yazi/.config/yazi/keymap.toml
+yazi/.config/yazi/README.md
+```
+
+- `S` 现在先 `cd -- /Users/xiaoxiaotu`，再启动保留 Conda 环境的阻塞 shell；默认
+  不再由该子 shell 占用当前外接盘。
+- 新增 `s S`，保留原来的“在当前 Yazi 目录开 shell”行为。它会显式占用当前磁盘，
+  用完必须 `exit` 回到 Yazi。
+- 两条路径都保留 `YAZI_RESTORE_CONDA_PROMPT=1` 和
+  `CONDA_AUTO_ACTIVATE_BASE=false`，因此不会把 `JAS2026`、`AAS` 等当前环境切回
+  `base`。
+
+验证：`yazi` 已在交互 PTY 中成功载入并退出，未报告 TOML/keymap 解析错误；
+`zsh -n -c` 已通过新 shell 命令的静态语法检查，`git diff --check` 已通过。自动化
+PTY 不具备 WezTerm 的终端响应，该测试中出现的 `Terminal response timeout` 不适用于
+真实 WezTerm/tmux。
+
+当前状态：重新启动 Yazi 后生效。弹出 storage 的流程仍是：退出 `s S` 内的前台
+任务和 shell（若使用过），然后按 tmux `C-s U`。Yazi 本身仍停留在 storage 时也会
+被 `C-s U` 保存目录、正常退出和停放；任何正在运行且实际读写该卷的命令都不能安全
+自动终止。
+
+更正（2026-09-09）：用户需要单键直接在当前目录工作，且 `exit` 后不返回 Yazi。
+因此撤销 Home/`ycd`/`s S` 的分流设计，`S` 现在按顺序执行：在当前目录启动保留
+Conda 环境的阻塞 shell，然后由同一个 shell 命令执行 `ya emit quit`。所以 shell
+`exit` 后直接回到启动 Yazi 的终端，Yazi 不会继续运行。外接盘在 shell 使用期间仍会被正常占用；若
+父 tmux shell 仍在 storage 目录，随后执行 `C-s U` 会将其停放到 Home 并安全弹盘。
+
+实现说明：Yazi 的 `run = ["shell ...", "quit"]` 会并发派发动作，不能用于等待
+`shell --block`。最终 `S` 使用一个命令模板：先运行原有的
+`YAZI_RESTORE_CONDA_PROMPT=1 CONDA_AUTO_ACTIVATE_BASE=false $SHELL`，用户退出该
+shell 后再在同一模板内运行 `ya emit quit`。这向 Yazi 发送正常的 `quit` 事件，不会
+向父终端发送信号。已保留历史可用的 `--block --confirm` 格式。
+
+## 2026-09-10：修复 `C-s U` 未执行的外接盘安全弹出
+
+问题根因：live tmux binding 原本直接执行
+`~/.config/tmux/scripts/external_workspaces_all.py`，但该文件在仓库中是 `0644`，
+没有执行权限；尾部 `|| true` 又吞掉 `permission denied`，所以 `C-s U` 看起来已按下
+却没有停车、检查或弹盘日志。
+
+已修改：
+
+```text
+tmux/.tmux.conf
+tmux/.config/tmux/scripts/external_workspaces_all.py
+tmux/.config/tmux/scripts/external_workspace.py
+tmux/README.md
+zsh/.config/zsh/aliases.zsh
+```
+
+- `C-s U` / `C-s I` 和 `storage-eject` / `storage-restore` 都改为显式
+  `python3 .../external_workspaces_all.py`，不再依赖 shebang 或可执行位。
+- 多卷包装器在执行每个已登记卷时抑制中间通知，最后只显示一次汇总；失败时显示
+  `external eject incomplete · <卷名> not completed`，不会再被已离线卷的提示覆盖。
+- tmux server 已执行 `source-file ~/.tmux.conf`，live binding 已核对为 Python 启动。
+
+本次实测执行安全停车后，所有空闲 SR shell/Yazi 均已移至 `/Users/xiaoxiaotu`；
+`lsof /Volumes/storage` 只剩 `4-SR:3.1` 的活动 Codex 及其 `node_repl`/`node`
+子进程，工作目录为 `/Volumes/storage/WORK/SR_论文修改`。因此 storage 被正确拒绝
+弹出，未强杀工作中的 Codex。结束或移走该 Codex 后再次按 `C-s U`，才会完成
+`diskutil eject`。`python3 -m py_compile` 与 `git diff --check` 均通过。
+
+补充：包装器对未完成的安全弹出会返回 `1`，这表示某卷仍有占用，不是 Python
+异常。tmux binding 使用 `python3 ... || true`，使该预期返回码不再显示为顶端的
+`'python3 ... eject' returned 1`；包装器会无条件调用 `tmux_notice.py`，在底栏显示
+最终汇总，同时仍向普通 shell 输出结果。当前若看到 `storage not completed`，先结束
+`4-SR:3.1` 的 Codex，再重试 `C-s U`。
+
+2026-09-10 复核：底栏已显示 `external eject incomplete · storage not completed`。
+`lsof` 确认唯一残留占用为 `4-SR:3.1` 的 Codex（PID 45080）及其 Node 子进程，工作
+目录 `/Volumes/storage/WORK/SR_论文修改`；所有其他 SR pane 已停放到 Home。最终结论
+与下一步同时记录在 `tmp/tmux_外接盘安全弹出.md`。
+
+2026-09-10：已创建 `~/AGENTS.md`，规定最终答复按项目 `tmp/` 分组维护、最新结论和
+下一步置顶、历史向下累积；默认不自动打开 Typora，仅在公式密集或需要视觉校对复杂
+排版时打开。该全局规则摘要保存到 `tmp/全局AGENTS规则.md`。
+
+## 2026-09-27：弹盘失败检查，等待确认目标设备
+
+本轮线程、日志和工作目录见固定的前 11 行。按最新规则，后续记录追加到本文末尾；
+不再将新状态置顶，既有历史保留。最终答复仍置顶写入 `tmp/tmux_外接盘安全弹出.md`。
+
+用户要求弹出“U盘”，但 `diskutil list external physical` 当前仅有两块设备：
+4 TB 的 disk4（含 storage 与 APFS 容器）和 1 TB 的 disk6（含 Linux）。上次名为
+“U盘”的 4 GB 设备不在列表，不能把本次 disk4 当作上次的同名编号直接弹出。
+已请求用户确认只弹 storage、只弹 Linux，还是两块都弹。
+
+只读检查结果：
+
+- 08:50:26 的操作日志明确记录 `cancelled: SR pane busy (AOSL.2:nested-yazi)`。
+- `park()` 的 Yazi 清理循环上限为 8 次；现场 `%34` / AOSL.2 仍有 8 个 Yazi 及
+  多层 shell 串联，前台为 PID 50385 的空闲 Zsh，根 shell PID 8306。
+  `lsof -nP +f -- /Volumes/storage` 显示这些进程仍持有盘内目录。
+- Linux 的 `diskutil info -plist disk6s3` 显示 MountPoint 为空，UUID 与 linux.json
+  一致，整块物理设备仍连接。08:50:38 日志曾有 lsof 检查失败；本轮未据此推断损坏。
+
+本轮尚未弹出设备，也没有向占用进程发送信号或按键；没有修改弹盘代码。仅调整续接
+文件头部格式、README 中的新记录位置说明，并保存最终检查结论。验证头部第 9/10 行
+续接命令及 `git diff --check`。下一步先获得目标确认，再对对应配置执行安全停车与
+普通 diskutil eject；若需修复深层嵌套，应采用有进展检查的有界清理，不盲目强杀整个
+进程树。操作前重新读取实时磁盘编号和进程，以上 PID/编号仅为本轮快照。
+
+## 2026-09-27 08:55：用户确认仅 storage，已完成安全弹出
+
+用户明确回复“只弹出 storage”。使用显式 `TMUX_EXTERNAL_CONFIG` 指向 storage.json，
+`TMUX_EXTERNAL_STATE` 指向 storage-workspace.json，运行 `external_workspace.py eject`，
+没有运行全部卷包装器，也没有操作 Linux。
+
+连续三次安全后端调用逐步退出空闲的嵌套 Yazi/shell：前两次分别报告 nested-yazi 和
+过渡态 zsh busy；每次先检查剩余占用再继续。第三次成功，未发送任意进程树的强杀信号，
+没有 force unmount，没有修改代码清理上限。08:55:27 日志为 lsof verified=True、
+users=False；08:55:31 日志为 `diskutil target=disk4 rc=0`、`success elapsed=17.6s`，
+命令退出码 0。保存弹出前 checkpoint 已成功。
+
+验证：`mount` 中不再有 disk4s2 / storage，也没有同盘 APFS disk5s2 / backup；
+Linux/disk6 未操作且仍连接。固定介质的 disk4 在设备清单中仍可见，不代表仍挂载。
+storage 现在可以安全拔线。
+
+后续：深层嵌套超过单次清理上限的问题仍在，下一次可单独改进有界清理与过渡态等待，
+不能宣称已修复该代码问题。插盘后可用 C-s I 恢复保存的工作区；本轮未重新挂盘复测。
+最终答复已置顶保存到 `tmp/tmux_外接盘安全弹出.md`。
+
+## 2026-09-27：IAP Neovim 配色只读排查，尚未修改
+
+用户先询问在 IAP 调用本地 nvim，随后明确“先介绍方案，不急着执行”，最新反馈是远端
+nvim 配色仍不正确。本轮按该约束只诊断，没有安装、同步或改动本地/远端编辑器配置。
+线程、日志路径、工作目录见头部固定 11 行。
+
+检查路径：本地 `nvim/.config/nvim-iap/init.lua`、`nvim/.config/nvim/README.md`、
+`scripts/nvim-iap`；远端 `/data1/elpt_2022_00083/kerui/.config/nvim-iap/init.lua` 与
+`.bashrc.minkerui`。VPN route 为 utun6，10.64.201.2:22 可达；仅通过普通 SSH 执行
+只读诊断和 Neovim headless 测试，没有从非交互 shell 启动 iap 重连 wrapper。
+
+login02 实测 tmux 1.8，default-terminal screen-256color，客户端 xterm-256color。
+该节点 tmux 当时只有 bash 前台，未找到活动 nvim，不能把 headless 结果当成用户
+当前编辑窗口的验证。共享配置默认 retrobox、termguicolors=false，别名 nvim/vim/vi
+指向轻量 wrapper。以 HOME=/data1/elpt_2022_00083/kerui、TERM=screen-256color、
+NVIM_APPNAME=nvim-iap 运行远端 Neovim headless，得到 theme=retrobox、bg=dark、
+tgc=false、Normal ctermfg=187/ctermbg=234、Comment ctermfg=102、spell=false。
+首次探测 vim.o.t_Co 在 Neovim 报 Unknown option，后续移除此字段后成功读取高亮。
+
+结论：配置确实与 Mac 的 TokyoNight 不同且主题已加载；当前缺少新截图，尚不能判定
+实际问题仅为主题风格还是旧会话的终端能力异常。已请求用户发当前截图，区分黑白、
+灰底红字和正常彩色但不喜欢。建议若链路正常，保留零插件轻量版，仅调整为冷色高
+对比度 256 色主题；不要为追求本地颜色盲目在 tmux1.8 内开启 termguicolors。
+
+本轮仅新增最终答复分组 `tmp/nvim_IAP配色与编辑.md` 并追加本记录，未进行主题更换。
+下一步结合截图和用户确认再实施；所有 SSH 诊断命令均已结束。
+
+## 2026-09-28 22:10：storage 已正常弹出
+
+用户仅请求推出 storage。线程 ID、会话日志、工作目录仍见前 11 行固定入口。
+初始物理盘为 disk4，storage=disk4s2，同盘含 APFS 容器 disk5；lsof 只有 Yazi 93040
+及其 bash 94449、zsh 94451 的盘内 cwd，没有正在写入的计算任务。
+
+以显式 storage.json 和 storage-workspace.json 环境变量调用
+`python3 ~/.config/tmux/scripts/external_workspace.py eject`，正常退出空闲占用并保存
+checkpoint。22:10:05 lsof verified=True、users=False；22:10:06
+`diskutil target=disk4 rc=0`，总耗时 15.1 秒，后端退出码 0。
+期间其他重复弹盘请求被互斥锁拒绝，没有并发运行多份清理。
+
+复核 `mount` 已无 storage 及同盘任何卷，可安全拔线。未强制卸载、未改代码，
+只更新本文与 `tmp/tmux_外接盘安全弹出.md`。下次插回后可按 C-s I 恢复保存的工作区；
+没有为测试再次挂载设备。此前 IAP nvim 配色排查仍待用户截图，与本次操作无关。
+
+## 2026-09-29：分析云雷达面板鼠标序列泄漏与终端错位
+
+线程、日志、工作目录见固定头部。用户提供 `参考图/2242ac73-12d3-4f03-9b93-96da0a58903a.png`，
+要求分析恢复 tmux 后的异常。本轮只读诊断，没有修改运行配置、输入按键、重置面板或
+终止进程。最终答复保存到新任务组 `tmp/tmux_恢复显示问题.md`。
+
+现场对应 `%30` / 4-SR 云雷达.1：pane_pid=8087、tty=/dev/ttys031，当前命令 zsh，
+pane_in_mode=1（copy mode）。`ps -t ttys031` 仅显示根 Zsh，前台组也是8087，无 Yazi。
+tmux mouse_any_flag=1、mouse_sgr_flag=1、alternate_on=1。`stty -a -f` 显示
+-opost、-isig、-iexten、-ixon。对照 `%32` / /dev/ttys033 的正常 Zsh 为 mouse/alternate
+全0、opost、isig、iexten。Zsh ZLE 自身也会关闭 echo/icanon，不能把这两项单独当故障。
+
+capture-pane 显示真实错误 `command not found: 11m35`、`37`、`12Myazi` 和鼠标数字串；
+历史还有 Yazi Terminal response timeout 与变形的自动 cd 输入。可确认当前 TUI 模式
+残留在 shell，SGR 鼠标事件碎片混入命令行；-opost 与阶梯状输出一致。
+外部原始协议依据 https://invisible-island.net/xterm/ctlseqs/ctlseqs.html 的 Mouse Tracking
+和 SGR(1006) 说明。没有把鼠标事件断言为图像或色彩代码。
+
+代码调查：
+- tmux/.tmux.conf:244 的 @resurrect-processes 包含 yazi；84-87 的 SR enter/focus hooks
+  与 client-attached restore 都使用 run-shell -b。
+- resurrect_session_hooks.sh 的 pre/post 仅暂停/恢复 session 排序 hook，不屏蔽 SR hooks。
+- external_workspace.py:607 附近 focus() 用 foreground shell 检测后 send_command("yazi")；
+  operation_in_progress() 只检查外接盘操作锁，未检查全局 Resurrect 恢复状态。
+- send_command():366 先 send-keys -l 再 Enter，不验证输入缓冲为空。idle_shell() 只检查
+  进程/前台组，不代表提示符已初始化完毕或终端模式正常。
+- stop_yazi():419 向前台 Yazi 发 TERM 后只等待 command 改变，没有终端状态核验。
+- 安装的 Resurrect process_restore_helpers.sh:38 也会 send-keys 启动进程；其历史回放为
+  cat 输出文件，不是把整份 scrollback 当 shell 输入，不能把 cat 回放说成确定根因。
+
+结论区分：残留模式及鼠标输入泄漏已有现场证据；恢复双入口竞争、Yazi 退出清理缺口是
+代码风险点，尚未隔离复现最初触发顺序。建议下一阶段先隔离测试，再加 restore 屏障、
+唯一启动归属和空闲 shell 终端校验；不关闭全部 tmux 鼠标功能、不杀 server、不删快照。
+本轮仅写分析与交接文档，`git diff --check` 用于文档格式检查。
+
+## 2026-09-30：tmux 鼠标选区到 macOS 剪贴板的通道已补齐
+
+线程、会话日志、工作目录沿用固定前 11 行。用户反馈 tmux 无法选择并 Cmd+C 复制。
+当前唯一 client 为 xterm-kitty，/dev/ttys000，2-Config / %16。Kitty 已有
+`map cmd+c copy_to_clipboard`，WezTerm 也有 CMD+c CopyTo Clipboard。tmux mouse=on，
+普通拖选属于 tmux；Kitty 原生 Cmd+C 只读取自己的选区。原 live `copy-command` 为空，
+默认 MouseDragEnd1Pane / Enter / 双击三击仅走默认 copy-pipe-and-cancel，显式 y 绑定
+才调用现有 copy_to_clipboard.sh。OSC52 曾可用，但鼠标复制没有配置直接 pbcopy 通道。
+
+本轮改动：tmux/.tmux.conf 在 copy-mode 区块增加
+`set -s copy-command '/usr/bin/pbcopy'`；直接对当前 server 执行同一 set-option 热生效，
+没有 source 整份配置以免触发恢复 hook。tmux/README.md 与
+kitty/.config/kitty/README.md 增加两条操作：普通拖选松手自动复制；Shift 拖选创建
+Kitty 原生选区后 Cmd+C 复制。未改 Kitty 默认鼠标策略或 Cmd+C 绑定，也没有改 IAP。
+
+验证：独立命名 tmux server（-f /dev/null）输出唯一测试文本，在 copy-mode 中建立
+选区，通过默认 copy-pipe-and-cancel + copy-command=/usr/bin/pbcopy 复制；pbpaste
+精确匹配测试文本。finally 恢复原剪贴板内容并 kill 仅该测试 server。live option
+显示 copy-command /usr/bin/pbcopy；git diff --check 通过。没有对用户工作面板发送
+测试输入；Kitty 原生 Shift 拖选依据其官方默认鼠标行为，本轮未用 UI 实测。
+
+最终答复保存至 tmp/tmux_选择与复制.md，最新内容置顶。当前复制设置无需重启；下一步
+用户可直接普通拖选后粘贴，或 Shift 拖选后 Cmd+C。若仍失败，需要定位实际选区是
+本地 tmux、远端 tmux 还是全屏程序；本轮变更只针对本地 macOS tmux。
+
+## 2026-10-02：修复 tmux 快照超时后的写入与保护问题
+
+线程 ID、会话日志和工作目录沿用固定前 11 行。本轮请求是处理
+`tmux snapshot failed · command timed out: .../tmux-resurrect/scripts/save.sh quiet`，
+不是恢复/删除 session，也没有弹盘或修改 IAP。当前 live 为 4 session、21 window、
+41 pane。初次正常保存实测 10.22 秒，未复现最初的 120 秒卡住；历史快照有
+191 秒、335 秒及更长的文件写入跨度，其中一份布局只写了部分 pane，夜间电源日志
+有多次 Sleep/DarkWake。因此睡眠/唤醒可能放大保存耗时，但没有旧阶段日志，
+不能把最初超时的具体子命令断言为 gzip、某个 pane 或磁盘故障。
+
+确认旧实现的两个问题：subprocess.run 超时只杀直接子进程，Resurrect 的管道和
+循环子进程可继续写；插件先更新正式 last，再抓取历史，失败可以留下布局/历史错配。
+checkpoint 在保存锁释放后复制历史包，也有自动保存竞争风险。
+
+本轮修改：
+
+- `tmux/.config/tmux/scripts/tmux_snapshot.py`：独立进程组运行并在超时时 TERM/KILL
+  清理；保留 120 秒保存限时；锁等待上限 15 秒，自动保存遇忙跳过。
+- 保存先进入同盘 `.pending-*` 临时目录，校验拓扑、压缩包及有历史/光标内容的
+  每个 pane 对应文件，校验期间拓扑改变则拒绝提交。成功才替换正式 archive/last；
+  普通替换失败会回滚 archive。checkpoint 复制也在同一锁内。
+- 新增 `tmux/.config/tmux/scripts/resurrect_save_tmux.sh`，仅拦截此次子进程的
+  `tmux show-option -gqv @resurrect-dir` 查询，其余命令转发原 tmux 可执行文件。
+  不修改 live 全局选项、不修改第三方插件。临时 PATH shim 由 Python 复制/赋执行权。
+  注意插件 helpers.sh 会把 `_RESURRECT_DIR` 清空，不能仅设置该环境变量重定向。
+- 保存期间 macOS 使用 `caffeinate -i`，只阻止空闲睡眠，不保证合盖运行。
+  `COPYFILE_DISABLE=1` 避免 tar 添加 AppleDouble 元数据。
+- 增加轮转日志 `~/.local/state/tmux/snapshot.log`：时间、拓扑、失败阶段，不记录 pane
+  正文。日志中保留了开发验证阶段的 staged-layout 失败，最后真实保存已正常。
+- `external_workspace.py` 仅把弹盘前 checkpoint 的外层等待从 120 调到 180 秒，
+  避免先于内层清理终止；该文件其余大量已有改动未重写。
+- `tmux/README.md` 第 296 行增加保存失败说明；新增 `tmux/tests/test_tmux_snapshot.py`。
+
+验证：15 项 pytest 全通过（隔离临时锁，不占用 live 保存锁），覆盖超时子进程、
+忽略 TERM 的子进程、失败保留旧快照、压缩包损坏/缺失 pane、拓扑改变、替换回滚、
+shim 路由、checkpoint 持锁及自动保存忙跳过。py_compile、Black check、Ruff
+`--select E4,E7,E9,F,I`、bash -n、git diff --check 全通过。未对旧 Python 3.9
+兼容代码做全仓升级/格式化，默认全规则 Ruff 的 UP 等历史风格规则未作为此轮门禁。
+
+还用真实插件把限时临时设为 0.2 秒模拟超时：正式 last 和 archive SHA256 均保持
+不变，无 `.pending-*` 残留。随后正式运行
+`python3 tmux/.config/tmux/scripts/tmux_snapshot.py checkpoint timeout-fix-verified`，
+20.58 秒完成，exit=0。新 checkpoint：
+`~/.local/share/tmux/resurrect/checkpoints/20261002T084931-timeout-fix-verified`，
+4 session、21 window、41 pane，41 个 pane 历史文件，布局/archive SHA256 与 manifest
+一致。没有杀 tmux server、没有向工作 pane 发送测试输入，也没有 source 整份配置。
+
+最终答复保存到 `tmp/tmux_快照保存.md`。脚本软链接已热生效，无需重启。
+下次若仍超时，先读 snapshot.log 的阶段和耗时，再针对 layout/scrollback 继续定位；
+不要直接删除历史快照或重启正在运行 Codex 的 server。硬性掉电不能靠脚本保证最后
+一刻内存状态，已生成的版本化 checkpoint 和 Codex JSONL 仍是恢复依据。
+
+## 2026-10-02：Neovim Markdown 按 r 打开浏览器预览
+
+线程 ID、会话日志和工作目录沿用本文前 11 行。用户询问 CW 的 Markdown 预览方法，
+希望按 r 预览。查询公开 `https://github.com/theniceboy/nvim/blob/master/init.vim`：
+CW 的 CompileRunGcc 将普通模式 r 按文件类型分派，Markdown 执行
+InstantMarkdownPreview，插件 suan/vim-instant-markdown，自动启动关闭、自动滚动开启。
+本地 nvim 已有相同 r 分派，但缺少 Markdown 分支；Yazi r 则已有 interactive open，
+本轮明确实现 Neovim r，未改 Yazi 键位、Typora 或 IAP。
+
+改动：
+
+- `nvim/.config/nvim/lua/config/keymaps.lua` 只增加 Markdown 分支，保存后执行
+  MarkdownPreview，SSH 环境提示未配置本地浏览器预览，不动其他语言分支。
+- 新增 `lua/plugins/markdown-preview.lua`，选择 LazyVim 自带 Markdown extra 使用的
+  iamcco/markdown-preview.nvim，但仅启用这一插件，未启用整个 Markdown extra。
+  按命令/快捷键 lazy-load；Space c p 切换，MarkdownPreviewStop 停止。
+  自动启动 off、离开 buffer 自动关闭、仅本机监听、实时更新、light 预览主题。
+  不在源码编辑区添加 conceal/虚拟文本，不影响 IAP 的 nvim-iap。
+- build 使用 upstream mkdp#util#install(true) 同步下载安装，随后检查 binary executable。
+  LazyVim 默认的无参数 install 是异步终端任务，headless 安装提前退出会中止下载；
+  本轮已修正并成功下载 macos-arm64 v0.0.10 预构建程序。
+- lazy-lock.json 只新增一项：markdown-preview.nvim master
+  a923f5fc5ba36a3b17e289dc35dc17f66d0548ee；没有更新其余插件版本。
+- README 第 247 行新增 Markdown 浏览器预览、键位、来源和本地/远端边界。
+- 新增 `nvim/tests/markdown_preview.lua`，支持 mapping/server 两种测试。
+
+验证：`nvim --headless -u NONE -l nvim/tests/markdown_preview.lua mapping`
+输出 MARKDOWN_R_SAVE_TEX_AND_REMOTE_GUARD_OK，验证 Markdown 先保存后预览、含空格文件名、
+原 TeX r 分派保留及远端 guard。真实配置测试：
+`nvim --headless -u ~/.config/nvim/init.lua -l nvim/tests/markdown_preview.lua server`
+输出 PREVIEW_HTTP_AND_STOP_OK http://localhost:8758/page/1；mock browser 回调避免打开
+GUI，真实平台 binary 启动成功，HTTP 页面有效，MarkdownPreviewStop 后 RPC 状态 -1。
+HTTP 测试必须异步执行 curl 并处理 nvim 事件，否则服务对 Neovim 的 RPC 会被同步
+system 调用阻塞，造成测试假超时。没有进行浏览器视觉截图检查。新插件与测试文件
+已用现有 Mason StyLua 格式化/check，通过 git diff --check。未改既有不相关代码格式。
+
+最终答复保存到 `tmp/nvim_Markdown预览.md`。用户重新打开本地 Neovim 后，编辑 .md
+在普通模式按 r；已有运行中的 Neovim 尚未重新读取新插件 spec，需要重新打开。
+公式渲染使用插件默认 KaTeX，Mermaid、图片、表格由插件支持；没有新增 Markdown LSP
+或格式化进程，也不主动启动 Typora。若用户实际要的是 Yazi r 一键预览，再单独讨论
+该键位已有菜单功能，避免误替换；当前 Yazi 右侧 Markdown 仍是 bat 源码预览。
+
+## 2026-10-04：storage 弹盘操作中断后确认已退出
+
+线程、日志路径和工作目录沿用前 11 行。用户要求推出 storage，识别为 disk4s2，
+UUID 89E88D6B-D5E8-34D3-A8D7-D53C7B8286C4，执行已有单卷入口
+`python3 ~/.config/tmux/scripts/external_workspace.py eject`（PID 44113）。
+日志显示完成 SR 停车并进入 checkpoint 保存，随后 lsof 检查返回 verified=False，
+末行提示 Use the -h option to get more help information；该次脚本未记录 eject success。
+用户中断并告知已经退出。随后只读复核：diskutil info /Volumes/storage 找不到卷，
+diskutil list external physical 为空，PID 44113 已结束。用户退出后已无外接盘，
+不继续运行弹盘或重连操作。本轮没有修改代码、强制卸载或终止其他工作进程。
+最终答复置顶保存于 tmp/tmux_外接盘安全弹出.md。
+若下次仍发生 lsof 失败，需检查扫描瞬间卷是否已由用户卸载；不能把本次用户完成
+退出当成脚本自动弹盘成功的证据。重新插入后使用 C-s I 恢复已保存 SR 路径。
+
+## 2026-10-04：latex 面板鼠标坐标污染修复
+
+线程、日志和工作目录沿用前 11 行。用户报告 `35;50;20M` 持续输入。
+定位 `1-IAP:latex.1` %10，TTY /dev/ttys011，唯一进程 zsh PID83614，
+PGID=TPGID=83614；mouse_any=1、mouse_sgr=1、alternate_on=1。
+捕获屏幕确认输入行被坐标占满。stty opost 正常，未盲目执行 stty sane。
+定向向此 tty 输出关闭鼠标 1000/1002/1003/1005/1006/1015、焦点1004、
+备用屏幕1049的控制序列并显示光标；随后 C-c 取消污染输入，没有执行乱码。
+仅在确认空闲提示符后 source ~/.config/zsh/aliases.zsh 加载新保护。
+
+修改 zsh/.config/zsh/aliases.zsh：添加 _dotfiles_prompt_terminal_reset，
+仅 interactive + TMUX + stdout tty 时输出上述重置，在 precmd 注册。
+不在前台应用运行期间执行，不关闭 tmux 全局鼠标，不重启 server。
+补充 tmux/README.md；最终答复置顶保存 tmp/tmux_恢复显示问题.md。
+
+验证 zsh -n 通过；独立 tmux socket prompt-reset-test-$$（空配置、zsh -f）
+模拟应用开启鼠标/备用屏幕并 sleep，运行中 flags=1/1/1，返回提示符后
+flags=0/0/0，测试 PASS 并清理测试 server。真实 %10 flags=0/0/0，
+相邻 %11/%12 Yazi 仍 flags=1/1/1。其余运行中的 Codex/Yazi 未发送按键。
+具体原始触发应用无法从现有证据确认；此次修复退出后的公共提示符边界。
+其他已打开旧 shell 尚未热加载，未来新 shell 自动加载；不要给正在运行的
+TUI 注入 source。若仍复现，记录触发程序和退出方式再查它的恢复/退出流程。
+
+## 2026-10-07：storage tmux 打不开的只读排查
+
+用户说 storage 盘 tmux 又打不开，Kitty 已解决。本轮只读检查，未卸载磁盘或改配置。
+storage 挂载 /Volumes/storage，disk4s2，UUID 与历史相同，可读写；4-SR 存在，
+大多数 pane 已进入 storage，%31/%36 Yazi 显示文件，状态 parked=false。
+%40 雾微物理课题.2 停在 Home，其保存路径
+/Volumes/storage/WORK/SR_论文修改/05_论文稿件/最终稿 经 ls 确认不存在。
+%42/%43 WHC 也在 Home，但状态文件没有对应保存路径，不能断言恢复失败。
+当前客户端在 2-Config。已询问“打不开”指 C-s I 恢复还是 C-s U 推出，
+等待具体窗口或报错后继续。Kitty 未动，任何活跃 Codex/Yazi 未中止。
+最终答复记录在 tmp/tmux_外接盘安全弹出.md 顶部。
+
+## 2026-10-07：用户明确要求恢复，已执行 SR 恢复入口
+
+执行 python3 ~/.config/tmux/scripts/external_workspace.py restore /dev/ttys000，
+退出码0。tmux list-clients 确认客户端从 2-Config 切至 4-SR 的 AOSL。
+复核 SR 云雷达、云雾课题、AOSL、ERA5、WHC.1 等目录位于 storage。
+雾微物理课题.2 的已不存在目标保持 Home，WHC.2/.3 无保存条目也保持 Home。
+本轮没有编辑代码、重启 server、终止任务、卸载磁盘或调整 Kitty。
+最终回复置顶写入 tmp/tmux_外接盘安全弹出.md。
+
+## 2026-10-07：纠正恢复成功判断，磁盘读取权限被拒绝
+
+用户提供 ls Operation not permitted，并要求 Computer Use。
+读取 metadata 成功但实际 ls /Volumes/storage 及 SR_论文修改 均失败。
+tmux server PID82592 从10月4日持续运行，当前 client54236，仅此不足以确认
+服务的 macOS responsible app。launchctl procinfo 需root，sudo -n 不可用；
+未索取密码或重启server。系统日志读取不可用，权限归属尚未查实。
+CUA getApp(WezTerm) 被工具安全限制拒绝，未尝试绕过；系统设置可用。
+UI查看文件与文件夹：WezTerm和kitty可移除宗卷均on；完全磁盘访问均off。
+停留完全磁盘访问页面，未切开关。已通过异步问题请求用户确认开启WezTerm
+完全磁盘访问并实测，因为Computer Use政策要求扩大安全敏感权限前逐次确认。
+
+代码改动 external_workspace.py 新增 workspace_access_error，用 tmux run-shell
+由服务进程执行 ls -A mount，只写临时检查状态/错误文件。restore_locked 先挂载
+再检查读取，通过后才ensure_session/switch-client；失败审计+提示+stderr返回1。
+实际恢复入口返回1，日志12:19明确 volume access failed: Operation not permitted。
+修正上一轮“路径存在即恢复成功”的判断。用户粘贴的额外 ]] 是独立命令语法问题，
+仓库cd_command仍输出单个 ]，未将磁盘读取拒绝误归因于这个拼写。
+
+新增 tmux/tests/test_workspace_access.py 两测试：路径引号实际执行与拒绝时
+不创建/切换session。pytest 2 passed，py_compile通过，完成Black/Ruff复核。
+更新 tmux/README.md 和置顶最终答复 tmp/tmux_外接盘安全弹出.md。
+尚未修复macOS读取权限，等待用户确认；确认后先测试WezTerm授权影响，
+若旧服务仍拒绝，不可kill-server丢失正在运行的Codex等任务。
+
+## 2026-10-07：用户确认 WezTerm 权限，读取与恢复实测成功
+
+用户明确选择“允许开启 WezTerm 完全磁盘访问并测试”。通过CUA系统设置
+点击WezTerm开关，出现管理员认证后交由用户在UI自行验证；未获取或输入密码。
+随后观察UI WezTerm完全磁盘访问on。执行已有tmux server的restore检查成功，
+restore /dev/ttys000 退出0，client切至4-SR AOSL。宿主ls storage/SR_论文修改
+成功；确认%35仅前台zsh及空提示符后发送ls，capture-pane实际显示目录全部条目，
+无Operation not permitted。原server PID82592保留，活跃Codex等任务未结束。
+12:21日志记录恢复start/finish无权限错误。这说明WezTerm授权实际修复了本次
+旧服务访问；无需重启WezTerm或tmux。
+授权后再核查雾微物理课题.2保存的05_论文稿件/最终稿仍ENOENT，独立路径问题保留。
+pytest2通过、py_compile、Black测试文件check、Ruff测试文件check、diffcheck均通过。
+最终答复置顶保存在tmp/tmux_外接盘安全弹出.md，用户下次直接使用C-s I。
+
+## 2026-10-09：按用户要求安全退出 storage
+
+执行 python3 ~/.config/tmux/scripts/external_workspace.py eject，退出0，耗时25.8秒。
+脚本停车SR，结束已完成的AOSL.1 Codex，保存快照tmux_resurrect_20261009T210615.txt
+（4 sessions、22 windows、45 panes，20.96秒验证成功），lsof verified=True users=False。
+21:06:36 diskutil target=disk4 rc=0，日志记录success。复核 /Volumes/storage 不存在，
+disk4s2 Mounted: No，mount 列表无外接盘分区。diskutil list仍列出物理disk4，
+但整盘分区均无挂载，已可拔线。未修改代码。最终答复置顶保存于
+tmp/tmux_外接盘安全弹出.md；重新插盘后C-s I恢复工作路径。
+
+## 2026-10-11：pwd 无输出、重开 WezTerm 可恢复
+
+用户报告间歇性无输出。当前只有一个WezTerm客户端/dev/ttys000，面板没有
+copy mode，空闲zsh无残留alternate/mouse；shell tty有ixon，client tty为-ixon。
+发现C-s R绑定refresh-client -S只刷新状态栏，与README宣称整屏重绘不符。
+修改tmux/.tmux.conf绑定R为refresh-client；通过tmux bind-key热更新，
+list-keys确认R为refresh-client，并执行一次client整屏刷新。
+修改zsh aliases中的提示符清理增加stty -ixon -ixoff，避免C-s转发触发流控。
+对当前36个前台确为根zsh的面板用termios关闭IXON/IXOFF并TCOON，未动TUI。
+首次跨会话os.tcgetpgrp返回ENOTTY，发生在任何修改前；改用ps PGID/TPGID
+均等于pane_pid确认前台shell后成功。没有注入用户命令或重启终端。
+
+独立PTY中zsh -fi加载实际aliases，调用hook，确认流控位关闭，再发送Ctrl-S
+和换行，TEST_OUTPUT_OK能出现，PASS。zsh -n和git diff --check通过。
+更新tmux README和tmp/tmux_恢复显示问题.md。已异步询问具体窗口/是否仍在现场，
+截至记录尚未收到答案。无法声称已复现用户原始故障或排除WezTerm渲染问题；
+若重现先比较capture-pane与真实屏幕，避免无证据调GPU/同步输出等设置。
+
+## 2026-10-11：汇总提交并同步 GitHub
+
+用户明确要求将目前全部修改commit并更新GitHub。检查origin为
+git@github.com:keruicode/dotfiles.git，当前master跟踪origin/master。
+收录全部现有配置、测试、说明、tmp最终答复及参考图；不撤销用户已有修改。
+常见私钥/API token扫描无命中，已有背景图与私密本地配置忽略规则保留。
+验证tmux/tests 17 passed；bash -n覆盖IAP、快照shim、nvim同步和启动脚本；
+zsh -n通过；nvim无配置Markdown mapping测试输出
+MARKDOWN_R_SAVE_TEX_AND_REMOTE_GUARD_OK；git diff --check通过。
+拟使用提交标题 Improve terminal recovery, external disk workflows and editor configs。
+提交/推送后以master的git log和origin/master一致性复核最终状态；本记录随提交保存，
+不为写入自身commit哈希再制造额外提交。最终回复文件tmp/git_提交与推送.md。

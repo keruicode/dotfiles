@@ -109,12 +109,14 @@ readonly remote_command="
 cd '$remote_workdir' &&
 source .bashrc.minkerui >/dev/null 2>&1 &&
 export TERM=xterm-256color &&
-export COLORTERM=truecolor &&
+unset COLORTERM &&
 unset NO_COLOR &&
-(tmux has-session -t '$remote_session' 2>/dev/null || tmux new-session -d -s '$remote_session' 'exec bash -i' >/dev/null 2>&1) &&
+# tmux 1.8 prefix-matches session targets. Check the full name first so a
+# missing "iap" session cannot silently resolve to an existing "iap-2".
+(tmux list-sessions -F '#S' 2>/dev/null | grep -Fqx '$remote_session' || tmux new-session -d -s '$remote_session' 'exec bash -i' >/dev/null 2>&1) &&
 tmux set-option -g default-terminal screen-256color >/dev/null 2>&1 &&
 tmux set-environment -gu NO_COLOR >/dev/null 2>&1 &&
-tmux set-environment -g COLORTERM truecolor >/dev/null 2>&1 &&
+tmux set-environment -gu COLORTERM >/dev/null 2>&1 &&
 tmux set-option -g status-bg colour235 >/dev/null 2>&1 &&
 tmux set-option -g status-fg colour250 >/dev/null 2>&1 &&
 tmux set-option -g status-left '' >/dev/null 2>&1 &&
@@ -129,7 +131,7 @@ exec tmux attach-session -d -t '$remote_session'
 "
 
 while [[ "$stop" == false ]]; do
-  env -u NO_COLOR TERM=xterm-256color COLORTERM=truecolor ssh \
+  env -u NO_COLOR -u COLORTERM TERM=xterm-256color ssh \
     -tt \
     -o ConnectTimeout=10 \
     -o ConnectionAttempts=1 \

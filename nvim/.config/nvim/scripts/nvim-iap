@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly nvim_bin="$HOME/software/nvim-linux-x86_64-v0.12.2/bin/nvim"
+
+if [[ ! -x "$nvim_bin" ]]; then
+  printf 'IAP Neovim not found: %s\n' "$nvim_bin" >&2
+  exit 127
+fi
+
+exec env NVIM_APPNAME=nvim-iap "$nvim_bin" "$@"

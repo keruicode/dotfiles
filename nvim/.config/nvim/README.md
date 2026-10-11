@@ -67,7 +67,7 @@ nvim main.tex
 | Normal / Visual | `;` | 进入命令行，等价于 `:` | 重复 `f/t` 搜索 |
 | Normal | `Q` | 关闭当前 window，等价于 `:q` | Ex mode |
 | Normal | `S` | 保存；TeX 中还会正向同步 Skim | 替换整行 |
-| Normal | `r` | 保存并按文件类型编译/运行 | 替换单字符 |
+| Normal | `r` | 保存并编译/运行；Markdown 在浏览器预览 | 替换单字符 |
 | Visual | `Y` | 复制到 macOS 系统剪贴板 | 按行复制 |
 
 重要差异：
@@ -230,6 +230,7 @@ eql -> 带 \label 的 equation 环境
 | filetype | 行为 |
 |---|---|
 | `tex` | 执行 `VimtexCompile`，启动/切换 continuous compile |
+| `markdown` | 保存并在浏览器打开渲染预览，不新建 terminal split |
 | `python` | 水平 split 中运行 `python3 当前文件` |
 | `c` | `gcc` 编译后运行 |
 | `cpp` | `g++ -std=c++11 -Wall` 编译后运行 |
@@ -242,6 +243,28 @@ eql -> 带 \label 的 equation 环境
 
 除 TeX 外，大部分任务会新建水平 terminal split 并进入 Terminal Insert 模式。
 当前实现没有 shell-quote 文件名，路径或文件名包含空格时可能运行失败。
+
+### 8.1 Markdown 浏览器预览
+
+本地 Mac：打开 `.md` 文件，在普通模式按 `r`，先保存再打开浏览器预览。
+继续编辑时自动更新、同步滚动；再次按 `r` 可打开当前文档预览。
+`Space c p` 切换预览开关；`:MarkdownPreviewStop` 停止预览服务。
+切换离开 Markdown buffer 时自动关闭对应预览。
+
+这里沿用 [CW 的 `r` 按文件类型分派思路](https://github.com/theniceboy/nvim/blob/master/init.vim)：
+他的公开配置使用 `suan/vim-instant-markdown` 和 `InstantMarkdownPreview`，
+我们接入 LazyVim 已采用的
+[markdown-preview.nvim](https://github.com/iamcco/markdown-preview.nvim)，
+支持表格、代码、图片、KaTeX 公式和 Mermaid。编辑区仍显示源码，不插入 inline
+虚拟文本，避免编辑位置与看到的位置不一致。预览服务只监听本机，不开放给局域网。
+
+首次安装由 Lazy 下载平台对应的预构建程序；新加入配置后需重新打开 Neovim。
+若下载失败，执行 `:Lazy build markdown-preview.nvim` 重试；本配置只安装这一个
+预览插件，没有启用整个 Markdown extra 的 LSP、格式化或 inline rendering。
+SSH/IAP 不启用该插件，远端轻量 `nvim-iap` 没有改动。
+
+注意：这是 **Neovim 普通模式**的 `r`。Yazi 的 `r` 仍为选择打开方式；
+此前 Yazi 右侧的 Markdown 是 `bat` 源码高亮，而不是排版后的浏览器预览。
 
 ## 9. LaTeX、VimTeX 与 Skim
 
@@ -479,20 +502,156 @@ Insert 模式仍显示，执行 `:LspRestart texlab`；也可按 `Space uh` 手�
 buffer-local LSP/VimTeX 映射会覆盖全局映射，因此必须在实际 TeX buffer 中
 检查。
 
-## 13. 配置文件索引
+## 13. IAP / login02
+
+IAP 不使用账号原始 Home `/public/home/elzd_2023_00026`。连接脚本会读取
+`/data1/elpt_2022_00083/kerui/.bashrc.minkerui`，把 `HOME` 设置为：
+
+```text
+/data1/elpt_2022_00083/kerui
+```
+
+IAP 默认使用零插件轻量 Neovim，完整 LazyVim 作为备用。实际位置是：
+
+```text
+~/.config/nvim-iap   -> 默认轻量配置，无插件
+~/.config/nvim       -> 完整 LazyVim 备用配置
+~/.local/share/nvim  -> 完整 LazyVim 插件目录
+```
+
+远端安装 Neovim 0.12.2。`nvim`、`vim`、`vi` 和 `nvim-lite` 默认进入轻量配置；需要
+LSP、VimTeX、picker 等插件时使用 `nvim-lazy`。两者使用同一个 Neovim 二进制，
+不会退回系统旧 Vim：
+
+```bash
+nvim README.md       # 默认，零插件轻量版
+nvim-lazy README.md  # 完整 LazyVim
+```
+
+完整配置的 `init.lua` 也有 IAP 入口保护：即使某个旧 shell 仍保留旧 alias，直接运行
+`nvim` 也会自动转入轻量配置。只有 `nvim-lazy` 显式设置 `NVIM_APPNAME=nvim`，才会
+加载完整 LazyVim。
+
+已经打开的旧 IAP shell 仍保留旧 alias。执行一次 `source ~/.bashrc.minkerui`，或重新
+进入 login03 后即可使用新默认值。若不想重新加载科研 module 栈，可直接执行：
+
+```bash
+~/.config/nvim/scripts/nvim-iap README.md
+```
+
+轻量版保留原有 Colemak 基础操作：
+
+| 快捷键 | 功能 |
+|---|---|
+| `u/e/n/i` | 上/下/左/右 |
+| `U/E` | 上/下移动 5 行 |
+| `N/I` | 行首/行尾 |
+| `k` / `K` | 插入 / 行首插入 |
+| `l` | 撤销 |
+| `=` / `-` | 下一个 / 上一个搜索结果 |
+| `S` / `Q` | 保存 / 退出 |
+| `su/se/sn/si` | 向上/下/左/右分屏 |
+| `Space wn/we/wu/wi` | 切换左/下/上/右窗口 |
+| `Space q` | 关闭当前窗口 |
+| `r` | 保存并运行 Python、Shell、NCL 或 LaTeX |
+| `Esc Esc` | 从内置终端返回 Normal 模式 |
+
+轻量版只启用 Neovim 原生 syntax/filetype，使用内置 `retrobox` 256 色主题和单行原生
+statusline。它不加载 Lazy、LSP、Treesitter、补全、图标、折叠渲染、inlay hints 或
+VimTeX；Markdown/LaTeX 的 conceal 和 fold 均关闭，因此屏幕位置就是实际写入位置。
+进入时还会执行一次完整 `redraw!`，避免嵌套 tmux 保留前一个完整 LazyVim 的屏幕残影。
+
+`nvim-lazy` 仍保留原完整功能。IAP 是无 GUI 环境：VimTeX 与 `latexmk` 编译可用，
+但 Skim、WezTerm 反向聚焦和 `VimtexView` 自动跳转仅在 macOS 启用。完整配置在远端
+自动关闭 smear-cursor、Mason、Treesitter 自动下载、Blink Rust 下载和 Lazy 更新
+检查；Blink 使用 Lua matcher，`vim-ncl` 仅在打开 NCL 文件时加载。
+
+login02/login03 使用旧版 tmux 1.8，只能可靠传递 256 色。轻量版因此使用内置
+`retrobox`，备用 `nvim-lazy` 使用内置 `habamax`；两者都关闭 `termguicolors`。Mac
+本机仍使用 `tokyonight-moon` 和 truecolor。
+`.bashrc.minkerui` 会把旧 pane 的 `screen` 升级为已安装 terminfo 的
+`screen-256color`，并在 `screen*`/`tmux*` 中移除误导程序的
+`COLORTERM=truecolor`；它继续移除 `NO_COLOR`，所以这是 256 色兼容模式，不是黑白
+模式。可在 IAP 中核对：
+
+```vim
+:lua print(vim.g.colors_name, vim.o.termguicolors, vim.env.TERM, vim.env.COLORTERM)
+```
+
+默认 `nvim` 预期为 `retrobox false screen-256color nil`；`nvim-lazy` 的主题为
+`habamax`。修改配色后需要退出并重新打开当前 Neovim，已运行实例不会自动重载全部
+主题；若当前老 shell 仍显示 `TERM=screen`，先执行一次
+`source ~/.bashrc.minkerui`。
+
+轻量版在 login03 实测连续启动通常为 `0.12-0.14 s`，没有插件冷启动；一次 ParaStor
+抖动样本为 `0.31 s`。下面的 `2.46 s` 冷启动只适用于备用 `nvim-lazy`。完整插件位于
+`/data1` ParaStor，共享盘首次建立 Lua 缓存时会明显慢于本机；不要把整个插件树复制
+到 `/tmp`，该目录含大量小文件，实测完整复制超过 90 秒。排查轻量版启动可运行：
+
+```bash
+/usr/bin/time -f '%e s' ~/.config/nvim/scripts/nvim-iap --headless +qa
+```
+
+若轻量版连续两次仍慢，再用 `nvim --startuptime /tmp/nvim-startup.log` 定位。若是
+`nvim-lazy` 慢，不要先删除 `~/.cache/nvim`，否则会强制再次承担冷启动成本。科研
+模块初始化本身约需 2.5 秒，目前保留不动，以免改变 ROCm、Intel、MPI、NCL 和 WRF
+编译环境。
+
+多个 IAP 节点共享同一个 `/data1` Home。若 login02 与 login03 同时退出 Neovim，
+默认 ShaDa 文件可能在 ParaStor 上竞争并报 `E886`。远端配置现把命令/搜索历史、
+寄存器和 marks 放到节点本地：轻量版使用
+`/tmp/nvim-iap-$USER-$HOSTNAME/shada/main.shada`，完整配置使用
+`/tmp/nvim-$USER-$HOSTNAME/shada/main.shada`。同一节点重开仍可恢复，节点重启后会
+清空；项目文件、swap 与 LazyVim session 不受影响。
+
+login02 和 server02 当前都无法直连 GitHub。`nvim-lazy` 的插件以 Mac 的
+`lazy-lock.json` 和本地 checkout 为准，不要在 IAP 上运行 `:Lazy update`。下面的
+命令会同时同步轻量配置、完整配置和启动 wrapper：
+
+```bash
+~/.config/nvim/scripts/sync-iap.sh
+```
+
+本机完成 `:Lazy update` 并确认正常后，再同步插件 checkout：
+
+```bash
+~/.config/nvim/scripts/sync-iap.sh --plugins
+```
+
+先预览 rsync 变更而不写入：
+
+```bash
+~/.config/nvim/scripts/sync-iap.sh --dry-run
+```
+
+首次迁移前的远端配置和 Neovim 0.4.3 均保留：
+
+```text
+~/.config/nvim.backup-20260902T131422
+~/.local/share/nvim.backup-20260902T131422
+~/software/nvim-linux64/bin/nvim-v0.4.3
+~/.bashrc.minkerui.bak-20260902T131422-lazyvim
+~/.bashrc.minkerui.bak-20260903-iap-light
+```
+
+## 14. 配置文件索引
 
 | 文件 | 责任 |
 |---|---|
 | `init.lua` | 启动 LazyVim |
 | `lazyvim.json` | 启用 LaTeX extra |
 | `lua/config/keymaps.lua` | Colemak、`r`、`S`、window 映射 |
-| `lua/config/options.lua` | Skim、缩进、剪贴板、wrap 等选项 |
+| `lua/config/options.lua` | Skim、远端 256 色/ShaDa、缩进、剪贴板、wrap 等选项 |
 | `lua/config/autocmds.lua` | NCL、TeX conceal/inlay hints、Skim 正反向同步 |
 | `lua/plugins/extend-vimtex.lua` | VimTeX warning 过滤、TexLab 引用预览长度 |
 | `lua/plugins/extend-vimtex.lua` | VimTeX warning/Quickfix 策略 |
 | `lua/plugins/snacks.lua` | Picker/Explorer 的 Colemak 导航 |
 | `lua/plugins/smear-cursor.lua` | 光标动画 |
-| `lua/plugins/vim-ncl.lua` | NCL 插件 |
+| `lua/plugins/iap.lua` | SSH/IAP 的离线、256 色、性能和 GUI 兼容设置 |
+| `lua/plugins/vim-ncl.lua` | 仅在 NCL buffer 中加载的语法插件 |
+| `scripts/sync-iap.sh` | 从 Mac 同步配置及已锁定插件到 IAP |
+| `scripts/nvim-iap` | IAP 零插件 Neovim 启动 wrapper |
+| `../nvim-iap/init.lua` | IAP 默认轻量配置与 Colemak 快捷键 |
 | `snippets/tex.json` | 本地 LaTeX snippet |
 | `lazy-lock.json` | 插件版本锁 |
 

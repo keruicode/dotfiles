@@ -2,7 +2,7 @@
 
 [English version](./README.md)
 
-这是一套用 GNU Stow 管理的 macOS 终端与编辑器配置，核心包括 WezTerm、tmux、
+这是一套用 GNU Stow 管理的 macOS 终端与编辑器配置，核心包括 WezTerm、Kitty、tmux、
 Codex、Neovim/LazyVim、Yazi 和 zsh；常用移动键尽量按 Colemak 布局设计。
 
 ## 配置包
@@ -10,13 +10,15 @@ Codex、Neovim/LazyVim、Yazi 和 zsh；常用移动键尽量按 Colemak 布局�
 | 配置包 | 部署位置 | 用途 |
 | --- | --- | --- |
 | `wezterm` | `~/.config/wezterm` | 终端界面、标签、窗格、GPU 渲染与本地背景图 |
+| `kitty` | `~/.config/kitty` | Nebula 终端界面、Colemak 窗格和轻量备用终端 |
 | `tmux` | `~/.tmux.conf`、`~/.config/tmux` | 持久会话、Codex 面板、IAP 重连与冷恢复 |
 | `nvim` | `~/.config/nvim` | LazyVim、LaTeX/VimTeX、Skim 与科研写作 |
 | `yazi` | `~/.config/yazi` | 文件管理、预览、主题与图片缩放 |
 | `zsh` | `~/.config/zsh` | 共用别名与终端颜色环境 |
 | `codex` | `~/.codex/AGENTS.md` | 全局 Codex 工作流与科学代码规范 |
 
-详细说明分别位于 [tmux/README.md](./tmux/README.md)、
+详细说明分别位于 [kitty/README.md](./kitty/.config/kitty/README.md)、
+[tmux/README.md](./tmux/README.md)、
 [nvim/.config/nvim/README.md](./nvim/.config/nvim/README.md) 和
 [yazi/.config/yazi/README.md](./yazi/.config/yazi/README.md)。
 
@@ -26,7 +28,7 @@ Codex、Neovim/LazyVim、Yazi 和 zsh；常用移动键尽量按 Colemak 布局�
 
 ```bash
 brew install stow tmux neovim yazi lazygit starship
-brew install --cask wezterm
+brew install --cask wezterm kitty font-jetbrains-mono
 ```
 
 克隆仓库，再把所需配置包链接到 Home：
@@ -34,7 +36,7 @@ brew install --cask wezterm
 ```bash
 git clone git@github.com:keruicode/dotfiles.git ~/dotfiles
 cd ~/dotfiles
-stow codex nvim tmux wezterm yazi zsh
+stow codex kitty nvim tmux wezterm yazi zsh
 ```
 
 新增文件后可以重复运行 `stow`。如果目标位置已经有未管理的同名文件，应先检查；

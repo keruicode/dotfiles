@@ -148,7 +148,7 @@ sqlite3 "$1" ".schema --indent"
 | 快捷键 | 功能 |
 | --- | --- |
 | `i` / `<Enter>` | smart-enter |
-| `S` | 在当前目录打开 shell，并保留当前 Conda 环境 |
+| `S` | 在当前目录打开 shell，并保留当前 Conda 环境；退出 shell 后立即退出 Yazi |
 | `' a` | 保存书签 |
 | `' '` | 通过 fzf 跳转书签 |
 | `' r` | 删除书签 |
@@ -156,6 +156,21 @@ sqlite3 "$1" ".schema --indent"
 | `F` | 使用 ripgrep 搜索内容 |
 | `f` | 智能过滤当前目录 |
 | `c a` | 压缩选中文件 |
+
+`S` 在当前目录给子 shell 设置 `CONDA_AUTO_ACTIVATE_BASE=false`。因此从
+`JAS2026`、`AAS` 等环境启动 Yazi 时，不会被 Conda 的自动设置切回 `base`。输入
+`exit` 后，同一个 shell 命令会通过 `ya emit quit` 让 Yazi 正常结束，直接回到启动
+Yazi 的终端，而不会停留在后台或回到 Yazi UI。
+
+若当前目录位于 `/Volumes/storage`，shell 正在使用时仍会占用该盘，这是 macOS 的
+正常保护机制。退出 shell 后，若启动 Yazi 的 tmux pane 本身仍在 storage 目录，按
+`C-s U` 会把该空闲 shell 停放到 Home，随后再安全弹盘。
+
+`S` 会触发一次性 zsh hook，在第一个提示符前重新激活同一个环境，只恢复左侧
+`(JAS2026)` 文字，不增加 `CONDA_SHLVL`；右侧 Starship 的 `via 🅒 JAS2026`
+与实际 Python 环境也保持不变。Yazi 本身若仍停在外接盘目录，同样会占用该盘；
+`C-s U` 会保存目录、正常退出空闲 Yazi、把对应 shell 停放到 Home，再检查 `lsof`
+后弹出。正在运行的命令不能被自动中断，需先在其 pane 中完成或手动停止。
 
 ## 插件来源与维护
 

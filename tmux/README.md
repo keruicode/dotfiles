@@ -16,7 +16,7 @@ codex resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
 code resume 019f3c6f-d910-7183-b5e4-3b95f53ba179
 ```
 
-详细中断交接见 [`Codex_resume_tmux.md`](./Codex_resume_tmux.md)。实际配置入口是 [`.tmux.conf`](./.tmux.conf)，辅助脚本位于 [`.config/tmux/scripts/`](./.config/tmux/scripts/)。
+详细中断交接见 [`Codex_resume_dotfiles.md`](../Codex_resume_dotfiles.md)，新记录追加在文末；固定第 10 行为续接命令，可直接运行 `head Codex_resume_dotfiles.md` 查看。实际配置入口是 [`.tmux.conf`](./.tmux.conf)，辅助脚本位于 [`.config/tmux/scripts/`](./.config/tmux/scripts/)。
 
 ## 结论
 
@@ -258,6 +258,15 @@ n = left    e = down    u = up    i = right
 | `U / E` | 向上 / 向下滚动 5 行 |
 | `Ctrl+Shift+v` | 粘贴系统剪贴板 |
 
+鼠标普通拖选属于 tmux 的选区，松手后自动复制到系统剪贴板，并退出 copy mode；
+双击选词、三击选行和 copy mode 中按 Enter 也通过 `/usr/bin/pbcopy` 复制。
+此通道由 `copy-command` 指定，不依赖终端处理 OSC 52。
+
+若要像 macOS 应用一样保留选区再按 `Cmd+C`，在 Kitty 中按住 **Shift** 拖动鼠标，
+松开后按 `Cmd+C`。这创建 Kitty 自己的选区；普通 tmux 拖选不属于 Kitty，
+所以原生 `Cmd+C` 无法直接复制它。全屏程序占用鼠标时也可用 Shift 拖选当前可见文本。
+见 [Kitty 鼠标设置](https://sw.kovidgoyal.net/kitty/conf/#mouse-actions)。
+
 ### 持久化
 
 | 快捷键 / 命令 | 功能 |
@@ -284,6 +293,29 @@ Continuum 每 5 分钟保存一次，当前保存内容包括：
 
 自动保存的 scrollback 压缩包只保留最新一份；只有手动 `C-s S` 和弹盘前 checkpoint 会把“该时刻的布局 + 匹配的 scrollback”长期绑定保存。
 
+#### 保存超时与失败保护
+
+`tmux snapshot failed · command timed out` 表示保存任务超过 120 秒，
+不等于 tmux session 或 Codex 会话已经丢失。大量历史、系统负载或睡眠唤醒期间
+都可能延长保存；具体原因需要查看当次日志，不能仅凭提示判断。
+
+保存现在先写入独立临时目录，校验布局数量、非空面板的历史文件和压缩包后，
+才更新正式 `last`。超时会终止本次保存的独立进程组，不影响 tmux server 或 pane
+里的 Codex、SSH 等进程；失败保留上一份正式快照。checkpoint 复制与保存共用锁，
+自动保存遇到长时间锁占用会跳过本次，手动保存则明确提示稍后重试。
+macOS 保存期间使用 `caffeinate -i` 防止空闲睡眠；它不保证合盖后持续运行。
+
+诊断日志自动轮转，不记录 pane 正文：
+
+```bash
+tail -n 60 ~/.local/state/tmux/snapshot.log
+tmux-save-all
+tmux-snapshots
+```
+
+日志包含保存开始/校验完成时间、拓扑数量及失败阶段。弹盘入口留出 180 秒等待
+保存和清理；保存失败时仍取消弹盘，不绕过占用检查。无需重启现有 tmux。
+
 tmux 仍不能冻结任意程序的内存。scrollback 恢复的是可查看文本，不是可继续交互的 TUI 状态；未保存的编辑器 buffer、程序内未落盘数据和已经退出且没有恢复策略的进程不能保证恢复。Codex 能续接是因为另存了 thread ID，真正进度仍以 Codex session JSONL 和已落盘文件为准。
 
 普通关闭 WezTerm、client detach 或网络断开不会终止仍在运行的 tmux server，此时只需：
@@ -309,7 +341,7 @@ tmux attach
 进入 4-SR：所有已记录的空闲 shell 回到各自 storage 目录
 聚焦 Yazi pane：该 pane 首次获得真实 client 焦点后才启动 Yazi；隐藏 pane 不并发启动
 切换 session / detach：目录、Yazi、Codex 和后台任务保持原状，不自动停车
-C-s U：退出可安全结束的 Yazi/空闲子 shell，所有空闲 SR shell 回到 Home
+C-s U：退出可安全结束的 Yazi/空闲子 shell，所有空闲 SR shell 回到 Home；关闭仍以 storage 为 cwd 的无任务 Kitty 窗口
 磁盘未挂载：保持 Home，进入 SR 时在底栏提示，不向不存在的路径执行 cd
 磁盘已连接但未挂载：按 C-s I 自动挂载，再切入并恢复
 磁盘重新插入：按 C-s I；4-SR 丢失时会按固定映射自动重建
@@ -317,35 +349,47 @@ C-s U：退出可安全结束的 Yazi/空闲子 shell，所有空闲 SR shell �
 
 | 快捷键 / 命令 | 功能 |
 |---|---|
-| `C-s U` | 停车、保存 eject checkpoint、检查占用并弹出 storage |
-| `C-s I` | 自动挂载已连接的 storage，切入 SR，恢复固定及额外 pane 路径；Yazi 随焦点启动；无需恢复时也提示 `SR already active` |
+| `C-s U` | 依次停车已登记外接盘的工作区、保存 checkpoint、清理可安全结束的终端占用、检查占用并弹出对应整块物理盘 |
+| `C-s I` | 挂载已连接的登记卷，切入 SR，恢复固定及已记录的额外 pane 路径；Yazi 随焦点启动 |
 | `storage-eject` | 与 `C-s U` 相同，供普通 Zsh 使用 |
 | `storage-restore` | 与 `C-s I` 的恢复逻辑相同，供 tmux 内 Zsh 使用 |
 
-这些操作在 tmux 内只通过底栏 `mbp` 左侧的通知报告进度和结果，不再输出到覆盖整屏的 `run-shell` view。`C-s U` 会依次显示 `parking SR panes`、`saving checkpoint`、`checking open files` 和 `releasing disk`。流程运行期间不要重复按 `U`；重复请求会显示 `operation already running`，不会再启动一份 checkpoint 或弹盘任务。
+这些操作在 tmux 内只通过底栏 `mbp` 左侧的通知报告结果，不再输出到覆盖整屏的 `run-shell` view。`C-s U` 会依次处理已登记的 `storage`、`Linux`、`兔兔啊`、`U盘` 工作区，并在最后只显示一次汇总；某一卷仍被任务占用时会明确显示 `external eject incomplete · <配置名> not completed`，不会被其他已离线卷的提示覆盖。`usb` 对应 `U盘`。流程通常需要约 10-20 秒。运行期间不要重复按 `U`；重复请求会显示 `operation already running`，不会再启动一份 checkpoint 或弹盘任务。
+
+`U盘` 是 4 GB ExFAT 设备，由 `external-workspaces/usb.json` 中的卷 UUID 识别，不依赖易变的 `disk4` 编号。其 SR pane 路径保存在 `~/.local/state/tmux/usb-workspace.json`；插回同一设备后按 `C-s I` 恢复，不能保证自动重建用户已删除的额外 pane。未登记的其他 U 盘不会被此快捷键自动处理。
+
+2026-09-23 修复：退出旧的 `Yazi -> S shell` 后，`ya emit quit` 可能直接回到另一个 Zsh。清理流程现在等待旧前台 PID 退出，而不是要求命令名必须变成 `yazi`，因此可继续逐层释放目录。若最后仍提示 `QuickLook` 占用，先关闭该卷文件的快速预览再重试；脚本不会自动强杀系统预览服务。本次残留的无可见窗口预览服务经单独确认后清理，随后正常 `diskutil eject` 成功，未强制卸载。
+
+若 storage 卷已经卸载但 USB 硬盘仍连接，`C-s U` 会按卷 UUID 找到父物理盘并再次执行整盘弹出，最终显示 `safe to unplug`。对 macOS 标记为固定介质的 USB 硬盘，成功弹出后硬件仍可能出现在 `diskutil list external physical`；只要 storage 与同盘其他卷都显示 `Mounted: No`，即可安全拔线。
 
 若弹盘因其他进程占用而取消，通知中显示占用进程摘要，完整 `lsof` 结果写入 `~/.local/state/tmux/storage-eject-busy.log`。各阶段耗时与返回码追加到 `~/.local/state/tmux/storage-operations.log`，用于检查“长时间没反应”的具体位置。
 
 正确拔盘流程：
 
 1. 用 `Alt+a` 查看带 `storage` 标记的 Codex；保存工作，并让 Codex、编辑器、下载或计算任务正常结束。
-2. 按一次 `C-s U`，等待底栏阶段提示。脚本依次执行“退出可安全结束的 Yazi/空闲子 shell、所有空闲 SR pane 回 Home、生成 `storage-before-eject` checkpoint、整盘 `lsof` 检查、`diskutil eject`”。
+2. 按一次 `C-s U`，等待底栏阶段提示。脚本依次执行“退出可安全结束的 Yazi/空闲子 shell、自动退出已确认完成的 Codex、所有空闲 SR pane 回 Home、生成 `storage-before-eject` checkpoint、关闭仍占用 storage 的无任务 Kitty 窗口及无终端孤儿只读扫描、整盘 `lsof` 检查、`diskutil eject`”。
 3. 只在看到 `storage ejected` 后拔线。看到 `still busy`、`snapshot failed` 或 `eject cancelled` 时不要强拔。
 
-不需要杀掉 `4-SR`，保留停车后的 session 才能最快恢复。若 Codex 正在 storage 目录运行，脚本会拒绝自动终止它；先记录 thread ID，正常退出 Codex 并回到 shell，再执行 `C-s U`。
+不需要杀掉 `4-SR`，保留停车后的 session 才能最快恢复。storage 配置已启用完成态
+Codex 自动收尾：仅当 pane 的前台进程确为 `codex`，并连续两次显示 `Ask Codex to do
+anything`、且其后没有 `Working`/`esc to interrupt` 时，`C-s U` 才会向该前台进程组发送
+`SIGINT` 并继续停车。正在运行、刚开始新任务、状态无法确认或前台并非 Codex 的 pane
+仍会拒绝弹出；这类情况先记录 thread ID，等待任务结束后重按 `C-s U`。
 
 重新插入后按 `C-s I`。若卷已连接但处于未挂载状态，配置会按 UUID 找到设备并挂载到 `/Volumes/storage`，然后切到 `4-SR` 并恢复路径；如果 session 已因中断消失，会先重建 `云雷达 / 云雾课题 / AOSL / ERA5` 四个 window 和五个 pane。设备未连接时只给出离线提示，不创建假的目录。
 
 安全边界：
 
-- 直接运行的 Yazi 会正常退出；Yazi 打开的子 shell 只有在确认它处于前台、无子进程且空闲时才会先 `exit`。对没有响应的 Yazi，仅在核实 pane 前台进程确实为 `yazi` 后发送 `TERM`。
-- 空闲 shell 才会自动 `cd`。若 pane 正在运行 Codex、编辑器、下载或计算任务，会报告 `still busy`，不会终止任务，也不会伪报已经停车。
+- 直接运行的 Yazi 仅在核实 pane 前台进程确实为 `yazi` 后发送 `TERM`；不再注入 `Esc`/`Q`，避免 Yazi 恰好退出时控制字符泄漏到 Zsh。Yazi 打开的子 shell 只有在确认它处于前台、无子进程且空闲时才会先 `exit`；多层旧 `Yazi -> S shell` 会逐层收起。
+- 空闲 shell 才会自动 `cd`。已验证完成提示的 Codex 会自动退出；其余 Codex、编辑器、下载或计算任务会报告 `still busy`，不会终止任务，也不会伪报已经停车。
+- 被中断的工具请求偶尔会留下无 TTY、父进程已退出的 `zsh -c find ... | head ...` 只读扫描。`C-s U` 会只在完整进程组仅含 shell、`find`、`head`，且不含 `-delete`、`-exec` 等危险参数时自动结束它；任何带终端、Python/Node/Codex、未知命令或可能写入的扫描仍保留并拒绝弹盘。
+- 独立 Kitty 窗口不属于 tmux pane。若其子树仅包含 shell、Yazi、tmux client，或本地 `iap` 客户端，`C-s U` 会关闭该窗口以释放外接盘；IAP 的远端 tmux 会话不会被删除。窗口内存在 Codex、Python、Node、编辑器或未知进程时，脚本会保留窗口并取消弹盘。
 - 自动切换 session 的 hook 始终返回成功，不再在顶部显示 `external_workspace.py switch "" returned 1`。进入离线或 busy 的 SR 时只在底栏提示；需要主动弹盘时，`C-s U` 会在底栏报告具体 busy pane。
 - 五个目标目录以 `external-workspaces/storage.json` 为准，不再让陈旧运行状态覆盖配置；发送给 shell 的 `cd` 也带目录存在判断，即使命令因 TUI 退出而延迟执行，也不会对已卸载路径报错。
 - 配置外拆分出的 pane 会按 `window:pane-index` 保存路径及 Yazi 恢复标记；插盘后同一 pane 仍会回到原目录。
 - session 切换和 client detach 永远不停车，避免打断后台 Codex，也避免反复向 Yazi pane 注入 `cd`。因此拔盘必须显式使用 `C-s U`，不能把“已离开 SR”当成“可以拔盘”。
 - Yazi 启动时会查询终端能力。恢复阶段只启动真实 client 当前可见的 Yazi pane，其他 pane 等获得焦点后再启动，避免 WezTerm 的 DA/DSR 响应混入另一个 shell。
-- `C-s U` 在 SR 释放后、弹盘前强制生成一份路径已回到 Home 的 checkpoint；保存或校验失败会取消弹出。
+- `C-s U` 在 SR 释放后、弹盘前强制生成一份路径已回到 Home 的 checkpoint；保存或校验失败会取消弹出。弹盘目标通过 storage 卷 UUID 解析为父物理盘，避免只卸载单个分区而遗漏同盘卷。
 - 从停车到 `diskutil eject` 的完整流程使用互斥锁；重复按 `U`、同时执行 `storage-restore`，或弹盘期间触发 SR 自动 hook，都不会启动冲突操作。
 - checkpoint 成功后还会用 `lsof` 检查整块盘。Finder、百度网盘或其他应用仍在使用硬盘时会取消弹出；底栏显示占用进程摘要，完整结果保存在 `~/.local/state/tmux/storage-eject-busy.log`。
 - `lsof` 最多等待 12 秒，`diskutil eject` 最多等待 45 秒。超时或无法可靠完成占用检查时会取消弹出并明确报错，不会把检查失败当成“无人占用”。
@@ -364,6 +408,8 @@ iap
 
 SSH 每 10 秒发送一次应用层心跳，连续两次无响应后断开；任何非主动停止的 SSH 退出都会在 3 秒后重连并 attach 原远端 session，不再只处理退出码 `255`。`iap` 支持最多 20 个并行实例：第一个使用远端 session `iap`，后续依次使用 `iap-2`、`iap-3`。每个实例有独立锁、远端 tmux session、尺寸和重连循环，因此可以多开，但不会让不同大小的窗口争抢同一个远端 client。
 
+login02 使用 tmux 1.8，它会把不存在的 session 名按前缀匹配。例如只存在 `iap-2` 时，普通的 `has-session -t iap` 也会错误成功，随后两个本地实例会一起 attach `iap-2` 并通过 `-d` 每隔几秒互相踢下。当前 wrapper 先用 session 列表做完整名称匹配，确保 `iap`、`iap-2` 分别真实存在，再执行 attach。若终端反复显示 `[detached]`、SSH `exit 0`，优先检查远端同名 session；真正的网络中断通常是 SSH `255`、`Broken pipe` 或 keepalive timeout。
+
 本地 pane 顶部会分别显示 `iap`、`iap-2` 等标签；`C-s t` 优先切换当前 IAP pane 对应的远端状态栏。关闭本地 pane 会停止该实例的重连并释放槽位；远端 session 保持 detached，下一次取得同一槽位后继续 attach。若父终端异常退出，wrapper 也会自行清理，不会遗留后台 SSH。
 
 连接不再启用 X11 forwarding，因此不会出现 `xauth key data not generated`；远端配置命令也全部静默执行。IAP 上的长期计算仍应在计算节点、调度系统或远端 tmux 中运行，不能在登录节点直接跑作业。
@@ -372,7 +418,7 @@ SSH 每 10 秒发送一次应用层心跳，连续两次无响应后断开；任
 
 远端 tmux 的默认状态栏已隐藏，不再显示 `[iap] 0:bash*`、主机名、时间和日期。本地 pane 顶部显示 `iap · 当前目录`；需要查看远端窗口时，按本地前缀 `C-s`，再按 `t`，可立即显示/隐藏仅含窗口名的精简状态栏。这个操作由本地直接向已连接的 IAP pane 发送命令，不需要输入远端的 `Ctrl+b` 前缀，也不会额外建立 SSH 连接。
 
-颜色能力在所有嵌套层保持一致：WezTerm 使用 `xterm-256color`，本地 tmux pane 使用 `tmux-256color`，IAP SSH client 使用 `xterm-256color`，login02 远端 tmux pane 使用 `screen-256color`。共享的 `.bashrc.minkerui` 不再强制降级到 8 色 `xterm`；login03 收到 `screen-256color` 后会补充 `COLORTERM=truecolor`。本地 tmux 启动时也会清除可能由 Codex 等非交互 launcher 带入的 `NO_COLOR`，并在 client attach 时更新 `TERM`、`TERM_PROGRAM`。后两项是 Yazi 在 tmux 中识别 WezTerm `Iip` 图像后端所必需的。
+颜色能力按终端层级声明：WezTerm 使用 `xterm-256color`，本地 tmux pane 使用 `tmux-256color`，IAP SSH client 使用 `xterm-256color`，login02/login03 的远端 tmux pane 使用 `screen-256color`。远端是 tmux 1.8，不能可靠传递 RGB；wrapper 与共享 `.bashrc.minkerui` 会在内层 tmux 中移除 `COLORTERM=truecolor`，并把历史 pane 的 `TERM=screen` 升级为 `screen-256color`。LazyVim 使用带 cterm 定义的 `habamax`。所有层仍会清除 `NO_COLOR`，所以远端保留 256 色，而不是黑白。本地 tmux 继续使用 truecolor，并在 client attach 时更新 `TERM`、`TERM_PROGRAM`；后两项是本地 Yazi 在 tmux 中识别 WezTerm `Iip` 图像后端所必需的。
 
 若 Yazi、Lazygit 等多个 TUI 同时近乎黑白，使用下面的值排查，优先检查环境而不是主题：
 
@@ -382,7 +428,7 @@ printf 'TERM=%s COLORTERM=%s NO_COLOR=%s\n' \
 tput colors
 ```
 
-本地 pane 应显示 `tmux-256color / truecolor / unset / 256`；login03 应显示 `screen-256color / truecolor / unset / 256`。关闭再打开 WezTerm 通常只是重新 attach 仍在后台运行的 tmux server，不会重建 server、pane、shell 或其中的 Yazi。可用下面的命令核对存活时间：
+本地 pane 应显示 `tmux-256color / truecolor / unset / 256`；login03 应显示 `screen-256color / unset / unset / 256`。关闭再打开 WezTerm 通常只是重新 attach 仍在后台运行的 tmux server，不会重建 server、pane、shell 或其中的 Yazi。可用下面的命令核对存活时间：
 
 ```bash
 tmux display-message -p 'server=#{pid} pane=#{pane_pid}'
@@ -552,3 +598,47 @@ Alt+f（按两次）
 ```
 
 如果这些正常，第一阶段即可视为稳定基线；第二阶段再加入纯 Codex 通知和用量模块。
+
+## Shell 不断出现鼠标坐标乱码
+
+如果移动鼠标时不断出现 `35;50;20M` 等字符，可能是全屏程序退出后，
+面板仍保留鼠标上报模式，tmux 因而把鼠标事件转给了已经回到提示符的 shell。
+这不是 LaTeX 文件内容损坏，也不需要关闭 tmux 全局鼠标功能。
+
+`zsh/.config/zsh/aliases.zsh` 现在通过 `precmd` 在交互式 tmux shell
+显示提示符前关闭残留的鼠标、焦点上报及备用屏幕模式；前台程序运行期间不执行。
+新 shell 自动加载。已经打开的旧 shell 需在空闲提示符执行
+`source ~/.config/zsh/aliases.zsh` 才会加载新保护。
+加载后，若 shell 输入行被污染，按 `Ctrl+C` 取消输入并触发提示符清理，
+不要按 Enter 执行乱码；不要在仍运行任务的面板盲目按 Ctrl+C。
+
+2026-10-04 实测 `1-IAP:latex` 的 `%10` 只有 zsh，却保留鼠标上报和备用屏幕；
+已定向清理并加载保护。两个相邻 Yazi 未被中止。具体哪个程序留下模式尚无日志
+证据，不能仅凭此现象认定是快照恢复或 Yazi 导致。
+
+## Storage 已进入目录但无法读取
+
+如果 `pwd` 显示硬盘目录，而 `ls` 返回 `Operation not permitted`，
+不能按路径显示判断恢复成功。先在系统设置的“隐私与安全性 → 文件与文件夹”
+检查终端的“可移除的宗卷”权限，再确认 tmux 服务进程实际能读取磁盘。
+旧 tmux 服务的权限归属可能与当前连接它的终端不同；仅切换客户端不保证权限改变。
+不要为此关闭仍承载 Codex 等任务的 tmux 服务。
+
+`Ctrl+s I` 的 storage 恢复入口现在先由 tmux 服务运行磁盘目录读取检查。
+读取被拒绝时会返回失败，提示检查 macOS 终端权限，详细错误写入
+`~/.local/state/tmux/storage-operations.log`；检查通过才继续切换和恢复。
+“完全磁盘访问权限”覆盖范围比可移除宗卷更大，须用户确认后再调整，
+调整后仍应在原面板执行 `ls` 实测；不能仅凭开关状态宣称问题已解决。
+
+## 命令执行后看不到输出
+
+先按 `Ctrl+q` 尝试解除软件流控暂停；再按 `Ctrl+s`、`Shift+r`（大写 R）
+整屏重绘。`C-s R` 已从只重绘状态栏的 `refresh-client -S` 改为
+`refresh-client`。Zsh 提示符清理也会设置 `stty -ixon -ixoff`，避免发送到
+shell 的 Ctrl+s 暂停输出。新 shell 自动生效；旧 shell 可在空闲时执行
+`source ~/.config/zsh/aliases.zsh` 加载。
+
+2026-10-11 已在当时空闲的 shell 应用关闭流控，并验证模拟终端收到 Ctrl+s
+后仍能输出。由于未捕获用户报告的异常现场，这属于已确认配置问题的修正，
+尚不能断定所有无输出现象都由流控引起。若再次发生，保留现场并记录 window/pane，
+对比 `tmux capture-pane` 与屏幕：缓冲有输出而屏幕无输出时再排查客户端渲染。

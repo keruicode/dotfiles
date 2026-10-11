@@ -1,4 +1,17 @@
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+local is_remote = vim.env.SSH_CONNECTION ~= nil or vim.env.SSH_TTY ~= nil
+local disabled_plugins = {
+  "gzip",
+  "tarPlugin",
+  "tohtml",
+  "tutor",
+  "zipPlugin",
+}
+
+if is_remote then
+  vim.list_extend(disabled_plugins, { "matchit", "matchparen", "netrwPlugin" })
+end
+
 if not (vim.uv or vim.loop).fs_stat(lazypath) then
   local lazyrepo = "https://github.com/folke/lazy.nvim.git"
   local out = vim.fn.system({ "git", "clone", "--filter=blob:none", "--branch=stable", lazyrepo, lazypath })
@@ -32,22 +45,13 @@ require("lazy").setup({
   },
   install = { colorscheme = { "tokyonight", "habamax" } },
   checker = {
-    enabled = true, -- check for plugin updates periodically
+    enabled = not is_remote, -- IAP cannot reach GitHub; update from the Mac copy.
     notify = false, -- notify on update
   }, -- automatically check for plugin updates
   performance = {
     rtp = {
       -- disable some rtp plugins
-      disabled_plugins = {
-        "gzip",
-        -- "matchit",
-        -- "matchparen",
-        -- "netrwPlugin",
-        "tarPlugin",
-        "tohtml",
-        "tutor",
-        "zipPlugin",
-      },
+      disabled_plugins = disabled_plugins,
     },
   },
 })

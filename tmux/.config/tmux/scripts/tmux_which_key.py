@@ -35,8 +35,8 @@ ROWS = [
     ("a", "Codex tasks", "r", "reload config"),
     ("S", "save checkpoint", "R", "refresh client"),
     ("P", "restore snapshot", "t", "IAP window bar"),
-    ("U", "eject storage", "C-s", "send prefix"),
-    ("I", "restore storage", "Esc", "close help"),
+    ("U", "safely eject all disks", "C-s", "send prefix"),
+    ("I", "restore all disks", "Esc", "close help"),
 ]
 
 

@@ -66,6 +66,12 @@ map("n", "r", function()
   -- 3. 根据不同的文件类型执行对应操作
   if ft == "tex" then
     vim.cmd("silent! VimtexCompile")
+  elseif ft == "markdown" then
+    if vim.env.SSH_CONNECTION or vim.env.SSH_TTY then
+      vim.notify("远程 Markdown 暂未配置本地浏览器预览", vim.log.levels.WARN)
+    else
+      vim.cmd("MarkdownPreview")
+    end
   elseif ft == "python" then
     vim.cmd("split")
     vim.cmd("term python3 " .. filename)
@@ -120,7 +126,7 @@ map("n", "S", function()
   vim.cmd("silent! write")
 
   -- 2. 如果当前是 tex 文件，立刻执行正向搜索（同步 Skim 位置）
-  if vim.bo.filetype == "tex" then
+  if vim.bo.filetype == "tex" and vim.fn.has("macunix") == 1 then
     vim.cmd("silent! VimtexView")
   end
-end, { silent = true, desc = "保存并同步 Skim" })
+end, { silent = true, desc = "保存；macOS 同步 Skim" })

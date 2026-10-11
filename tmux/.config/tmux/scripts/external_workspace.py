@@ -4,10 +4,12 @@ import fcntl
 import json
 import os
 import plistlib
+import re
 import signal
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -34,6 +36,7 @@ NOTICE_SCRIPT = Path(__file__).resolve().with_name("tmux_notice.py")
 OPERATION_LOCK_PATH = STATE_PATH.with_name("storage-operation.lock")
 OPERATION_LOG_PATH = STATE_PATH.with_name("storage-operations.log")
 BUSY_LOG_PATH = STATE_PATH.with_name("storage-eject-busy.log")
+CODEX_COMPLETION_PROMPT = "Ask Codex to do anything"
 
 
 def run(
@@ -47,6 +50,8 @@ def run(
             stdout=subprocess.PIPE if capture else None,
             stderr=subprocess.PIPE if capture else None,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as error:
@@ -239,6 +244,25 @@ def disk_info(identifier: str) -> Dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
+def configured_volume_info(config: Dict[str, object]) -> Dict[str, object]:
+    expected_uuid = str(config.get("volume_uuid", ""))
+    if not expected_uuid:
+        return {}
+    info = disk_info(expected_uuid)
+    if str(info.get("VolumeUUID", "")) != expected_uuid:
+        return {}
+    return info
+
+
+def eject_target(config: Dict[str, object]) -> str:
+    info = configured_volume_info(config)
+    return str(
+        info.get("ParentWholeDisk")
+        or info.get("DeviceIdentifier")
+        or config["mount_point"]
+    )
+
+
 def mounted(config: Dict[str, object]) -> bool:
     mount_point = str(config["mount_point"])
     mount_ready = os.path.ismount(mount_point)
@@ -369,27 +393,33 @@ def unwind_yazi_subshell(pane: Dict[str, object]) -> bool:
     if not idle_yazi_subshell(pane):
         return False
     pane_id = str(pane["id"])
-    old_command = str(pane["command"])
+    old_foreground = foreground_pid(pane)
+    if old_foreground is None:
+        return False
     cancel_pane_mode(pane_id)
     tmux(["send-keys", "-t", pane_id, "C-c"])
     time.sleep(0.1)
     if not send_command(pane_id, "exit"):
         return False
-    if not wait_for_command(pane_id, old_command, timeout=2.0):
-        return False
-    result = tmux(["display-message", "-p", "-t", pane_id, "#{pane_current_command}"])
-    return result.returncode == 0 and result.stdout.strip() == "yazi"
+    # `ya emit quit` can return directly to another zsh, without showing Yazi.
+    # Wait for this shell to exit instead of requiring a different command name.
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        current = foreground_pid(pane)
+        if (
+            process_details(old_foreground) is None
+            and current is not None
+            and current > 1
+            and current != old_foreground
+        ):
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def stop_yazi(pane: Dict[str, object]) -> bool:
     pane_id = str(pane["id"])
     cancel_pane_mode(pane_id)
-    tmux(["send-keys", "-t", pane_id, "Escape"])
-    time.sleep(0.15)
-    tmux(["send-keys", "-t", pane_id, "Q"])
-    if wait_for_command(pane_id, "yazi", timeout=1.5):
-        return True
-
     foreground = foreground_pid(pane)
     if foreground is None or foreground == int(pane["pid"]):
         return False
@@ -404,6 +434,54 @@ def stop_yazi(pane: Dict[str, object]) -> bool:
     return wait_for_command(pane_id, "yazi", timeout=2.5)
 
 
+def pane_transcript(pane_id: str, lines: int = 48) -> str:
+    result = tmux(["capture-pane", "-p", "-t", pane_id, "-S", f"-{lines}"])
+    return result.stdout if result.returncode == 0 else ""
+
+
+def completed_codex_transcript(transcript: str) -> bool:
+    """Return true only for Codex's idle prompt at the end of a pane."""
+    tail = [line.strip() for line in transcript.splitlines() if line.strip()][-16:]
+    for index, line in enumerate(tail):
+        if CODEX_COMPLETION_PROMPT not in line:
+            continue
+        following = "\n".join(tail[index + 1 :])
+        return "Working (" not in following and "esc to interrupt" not in following
+    return False
+
+
+def completed_codex_pane(pane: Dict[str, object]) -> Optional[int]:
+    """Return the foreground Codex process group when it is stably idle."""
+    if Path(str(pane["command"])).name != "codex":
+        return None
+    foreground = foreground_pid(pane)
+    if foreground is None or foreground == int(pane["pid"]):
+        return None
+    process = run(["ps", "-o", "comm=", "-p", str(foreground)])
+    executable = Path(process.stdout.strip()).name if process.returncode == 0 else ""
+    if executable != "codex":
+        return None
+    pane_id = str(pane["id"])
+    if not completed_codex_transcript(pane_transcript(pane_id)):
+        return None
+    # A second stable prompt prevents closing a pane while Codex is transitioning
+    # from a completed answer to a newly submitted task.
+    time.sleep(0.35)
+    return foreground if completed_codex_transcript(pane_transcript(pane_id)) else None
+
+
+def stop_completed_codex(pane: Dict[str, object]) -> bool:
+    """Exit a verified completed Codex CLI without touching active work."""
+    foreground = completed_codex_pane(pane)
+    if foreground is None:
+        return False
+    try:
+        os.killpg(foreground, signal.SIGINT)
+    except (OSError, ProcessLookupError):
+        return wait_for_command(str(pane["id"]), "codex", timeout=0.5)
+    return wait_for_command(str(pane["id"]), "codex", timeout=3.0)
+
+
 def wait_for_path(pane_id: str, target: str, timeout: float = 2.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -415,6 +493,8 @@ def wait_for_path(pane_id: str, target: str, timeout: float = 2.0) -> bool:
 
 
 def notify(message: str, level: str = "info", duration: float = 5.0) -> None:
+    if os.environ.get("TMUX_EXTERNAL_SUPPRESS_NOTICES") == "1":
+        return
     if os.environ.get("TMUX"):
         run(
             [str(NOTICE_SCRIPT), "show", level, str(duration), message],
@@ -673,22 +753,48 @@ def park(
 
             command = str(pane["command"])
             had_yazi = command == "yazi"
-            if command in SHELL_COMMANDS and idle_yazi_subshell(pane):
-                had_yazi = True
-                if not unwind_yazi_subshell(pane):
-                    busy.append(f"{key.replace(':', '.')}:yazi-shell")
+            yazi_cleanup_failed = False
+            # A stale pane can contain multiple old `Yazi -> S shell` layers.
+            # Unwind every idle layer before parking the underlying shell.
+            for _ in range(8):
+                if command in SHELL_COMMANDS and idle_yazi_subshell(pane):
+                    had_yazi = True
+                    if not unwind_yazi_subshell(pane):
+                        busy.append(f"{key.replace(':', '.')}:yazi-shell")
+                        yazi_cleanup_failed = True
+                        break
+                    pane = list_panes(session[0]).get(key, pane)
+                    command = str(pane["command"])
                     continue
+                if command == "yazi":
+                    had_yazi = True
+                    saved["resume"] = "yazi"
+                    if not stop_yazi(pane):
+                        busy.append(f"{key.replace(':', '.')}:yazi")
+                        yazi_cleanup_failed = True
+                        break
+                    pane = list_panes(session[0]).get(key, pane)
+                    command = str(pane["command"])
+                    continue
+                break
+            else:
+                busy.append(f"{key.replace(':', '.')}:nested-yazi")
+                yazi_cleanup_failed = True
+            if yazi_cleanup_failed:
+                continue
+
+            if command == "codex" and bool(config.get("close_completed_codex")):
+                if not stop_completed_codex(pane):
+                    busy.append(f"{key.replace(':', '.')}:codex")
+                    continue
+                audit(
+                    "eject",
+                    f"closed completed Codex pane {key.replace(':', '.')}",
+                )
                 pane = list_panes(session[0]).get(key, pane)
                 command = str(pane["command"])
 
-            if command == "yazi":
-                saved["resume"] = "yazi"
-                if not stop_yazi(pane):
-                    busy.append(f"{key.replace(':', '.')}:yazi")
-                    continue
-                pane = list_panes(session[0]).get(key, pane)
-                command = str(pane["command"])
-            elif entry and not entry.get("resume"):
+            if entry and not entry.get("resume"):
                 saved["resume"] = ""
             elif not entry and had_yazi:
                 saved["resume"] = "yazi"
@@ -737,11 +843,206 @@ def volume_users(config: Dict[str, object]) -> Tuple[bool, str, str]:
     return False, "", detail[-1] if detail else f"lsof exited {result.returncode}"
 
 
+def lsof_pids(users: str) -> Set[int]:
+    pids: Set[int] = set()
+    for line in users.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) > 1 and parts[1].isdigit():
+            pids.add(int(parts[1]))
+    return pids
+
+
+def process_table() -> Dict[int, Dict[str, object]]:
+    result = run(
+        ["ps", "-axo", "pid=,ppid=,pgid=,tty=,comm=,args="], timeout=4.0
+    )
+    if result.returncode != 0:
+        return {}
+    processes: Dict[int, Dict[str, object]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(maxsplit=5)
+        if (
+            len(parts) < 5
+            or not parts[0].isdigit()
+            or not parts[1].isdigit()
+            or not parts[2].isdigit()
+        ):
+            continue
+        processes[int(parts[0])] = {
+            "ppid": int(parts[1]),
+            "pgid": int(parts[2]),
+            "tty": parts[3],
+            "command": parts[4],
+            "args": parts[5] if len(parts) > 5 else parts[4],
+        }
+    return processes
+
+
+def kitty_session_root(
+    pid: int, processes: Dict[int, Dict[str, object]]
+) -> Optional[int]:
+    """Return the Kitty run-shell login ancestor for a process, if any."""
+    current = pid
+    visited: Set[int] = set()
+    while current > 1 and current not in visited:
+        visited.add(current)
+        process = processes.get(current)
+        if not process:
+            return None
+        args = str(process["args"])
+        if "kitty.app/Contents/MacOS/kitten run-shell" in args:
+            return current
+        current = int(process["ppid"])
+    return None
+
+
+def process_descendants(
+    root: int, processes: Dict[int, Dict[str, object]]
+) -> List[int]:
+    children: Dict[int, List[int]] = {}
+    for pid, process in processes.items():
+        children.setdefault(int(process["ppid"]), []).append(pid)
+    descendants: List[int] = []
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        descendants.append(current)
+        stack.extend(children.get(current, []))
+    return descendants
+
+
+def command_name(process: Dict[str, object]) -> str:
+    return Path(str(process["command"])).name.lstrip("-")
+
+
+def kitty_session_is_safe_to_close(
+    pids: List[int], processes: Dict[int, Dict[str, object]]
+) -> Tuple[bool, str]:
+    """Allow only disposable terminal sessions to be closed during eject.
+
+    A local iap client is intentionally treated as disposable: its remote tmux
+    session survives the local SSH client closing.  Codex, interpreters and any
+    unknown foreground command remain a hard stop for automatic eject.
+    """
+    names = {
+        command_name(processes[pid])
+        for pid in pids
+        if pid in processes
+    }
+    allowed = {"login", "zsh", "bash", "sh", "fish", "yazi", "tmux", "sleep"}
+    if names <= allowed:
+        return True, ""
+    if names <= allowed | {"ssh"}:
+        is_iap = any(
+            "/opt/homebrew/bin/iap" in str(processes[pid]["args"])
+            for pid in pids
+            if pid in processes
+        )
+        if is_iap:
+            return True, ""
+    return False, ",".join(sorted(names - allowed)) or "unknown"
+
+
+def close_disposable_kitty_sessions(config: Dict[str, object]) -> Tuple[int, List[str]]:
+    """Close standalone Kitty windows that retain this volume as their cwd.
+
+    tmux panes are parked separately.  Kitty OS windows are not tmux panes, so
+    they must be discovered from lsof and closed as terminal sessions.  This
+    never closes a Kitty session containing Codex or a local interpreter.
+    """
+    verified, users, _ = volume_users(config)
+    if not verified or not users:
+        return 0, []
+    processes = process_table()
+    roots = {
+        root
+        for pid in lsof_pids(users)
+        if (root := kitty_session_root(pid, processes)) is not None
+    }
+    closed = 0
+    blocked: List[str] = []
+    for root in sorted(roots):
+        pids = process_descendants(root, processes)
+        safe, detail = kitty_session_is_safe_to_close(pids, processes)
+        if not safe:
+            blocked.append(f"kitty:{detail}")
+            continue
+        # Signal leaves first, then the Kitty login session.  This matches
+        # closing only that OS window rather than quitting the Kitty app.
+        for pid in reversed(pids):
+            try:
+                os.kill(pid, signal.SIGHUP)
+            except (OSError, ProcessLookupError):
+                pass
+        closed += 1
+    if closed:
+        time.sleep(0.5)
+    return closed, blocked
+
+
+def is_disposable_orphaned_inspection_group(
+    pids: List[int], processes: Dict[int, Dict[str, object]]
+) -> bool:
+    """Recognize an abandoned non-interactive `find | head` inspection group.
+
+    A cancelled Codex tool request can orphan this exact read-only command group.
+    It has no terminal and cannot receive user input, so it is safe to end before
+    ejecting.  Deliberately narrow matching avoids touching detached computation.
+    """
+    if not pids:
+        return False
+    first = processes.get(pids[0])
+    if not first:
+        return False
+    leader = processes.get(int(first["pgid"]))
+    if not leader or int(leader["ppid"]) > 1 or str(leader["tty"]) not in {"?", "??"}:
+        return False
+    if command_name(leader) not in SHELL_COMMANDS:
+        return False
+    names = {command_name(processes[pid]) for pid in pids if pid in processes}
+    if not names <= {"zsh", "bash", "sh", "find", "head"} or "find" not in names:
+        return False
+    args = str(leader["args"])
+    if "find " not in args or "| head -" not in args:
+        return False
+    return not bool(re.search(r"(^|\s)-(?:delete|exec|execdir|ok|okdir)\b", args))
+
+
+def close_disposable_orphaned_inspection_jobs(
+    config: Dict[str, object]
+) -> int:
+    """Stop only known abandoned read-only inspection jobs holding this volume."""
+    verified, users, _ = volume_users(config)
+    if not verified or not users:
+        return 0
+    processes = process_table()
+    groups: Dict[int, List[int]] = {}
+    for pid, process in processes.items():
+        groups.setdefault(int(process["pgid"]), []).append(pid)
+    disposable = set()
+    for pid in lsof_pids(users):
+        process = processes.get(pid)
+        if not process:
+            continue
+        pgid = int(process["pgid"])
+        pids = groups.get(pgid, [])
+        if is_disposable_orphaned_inspection_group(pids, processes):
+            disposable.add(pgid)
+    for pgid in sorted(disposable):
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            pass
+    if disposable:
+        time.sleep(0.5)
+    return len(disposable)
+
+
 def save_eject_checkpoint(config: Dict[str, object]) -> bool:
     script = HOME / ".config/tmux/scripts/tmux_snapshot.py"
     result = run(
         [str(script), "checkpoint", f"{config['name']}-before-eject", "--quiet"],
-        timeout=120.0,
+        timeout=180.0,
     )
     if result.returncode == 0:
         return True
@@ -758,19 +1059,64 @@ def eject_locked(config: Dict[str, object]) -> int:
     started = time.monotonic()
     if not mounted(config):
         clear_busy_log()
-        notify(f"{config['name']} already offline", "ok", 8.0)
-        audit("eject", "already offline")
+        info = configured_volume_info(config)
+        if not info:
+            notify(f"{config['name']} already ejected · safe to unplug", "ok", 10.0)
+            audit("eject", "already ejected: device not connected")
+            return 0
+        target = eject_target(config)
+        notify(f"{config['name']} unmounted · ejecting {target}", "info", 15.0)
+        result = run(["diskutil", "eject", target], timeout=45.0)
+        audit(
+            "eject",
+            f"unmounted diskutil target={target} rc={result.returncode}",
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip().splitlines()
+            notify(
+                f"{config['name']} eject failed · "
+                f"{detail[-1] if detail else 'diskutil error'}",
+                "error",
+                10.0,
+            )
+            return result.returncode or 1
+        notify(f"{config['name']} ejected · safe to unplug", "ok", 10.0)
+        audit("eject", "success from unmounted state")
         return 0
     notify(f"{config['name']} eject · parking SR panes", "info", 15.0)
     audit("eject", "parking SR panes")
     if park(config, quiet=True, notify_error=True) != 0:
-        audit("eject", "cancelled: SR pane busy")
+        try:
+            busy_detail = ", ".join(
+                BUSY_LOG_PATH.read_text(encoding="utf-8").splitlines()
+            )
+        except OSError:
+            busy_detail = "unknown"
+        audit("eject", f"cancelled: SR pane busy ({busy_detail})")
         return 1
     notify(f"{config['name']} eject · saving checkpoint", "info", 125.0)
     audit("eject", "saving checkpoint")
     if not save_eject_checkpoint(config):
         audit("eject", "cancelled: checkpoint failed")
         return 1
+    closed_kitty, blocked_kitty = close_disposable_kitty_sessions(config)
+    if closed_kitty:
+        notify(
+            f"{config['name']} eject · closed {closed_kitty} Kitty window(s)",
+            "info",
+            10.0,
+        )
+        audit("eject", f"closed disposable Kitty windows={closed_kitty}")
+    if blocked_kitty:
+        audit("eject", f"kept active Kitty windows={','.join(blocked_kitty)}")
+    closed_orphans = close_disposable_orphaned_inspection_jobs(config)
+    if closed_orphans:
+        notify(
+            f"{config['name']} eject · closed {closed_orphans} orphaned scan(s)",
+            "info",
+            10.0,
+        )
+        audit("eject", f"closed disposable orphaned scans={closed_orphans}")
     notify(f"{config['name']} eject · checking open files", "info", 15.0)
     check_started = time.monotonic()
     verified, users, detail = volume_users(config)
@@ -811,12 +1157,11 @@ def eject_locked(config: Dict[str, object]) -> int:
     clear_busy_log()
     notify(f"{config['name']} eject · releasing disk", "info", 50.0)
     disk_started = time.monotonic()
-    result = run(
-        ["diskutil", "eject", str(config["mount_point"])], timeout=45.0
-    )
+    target = eject_target(config)
+    result = run(["diskutil", "eject", target], timeout=45.0)
     audit(
         "eject",
-        f"diskutil rc={result.returncode} "
+        f"diskutil target={target} rc={result.returncode} "
         f"elapsed={time.monotonic() - disk_started:.1f}s",
     )
     if result.returncode != 0:
@@ -848,18 +1193,53 @@ def eject(config: Dict[str, object]) -> int:
         return eject_locked(config)
 
 
+def workspace_access_error(mount_point: str) -> str:
+    """Check access from the tmux server, which can have different macOS rights."""
+    with tempfile.TemporaryDirectory(prefix="tmux-volume-access-") as directory:
+        error_path = Path(directory) / "error"
+        status_path = Path(directory) / "status"
+        command = (
+            f"/bin/ls -A {shlex.quote(mount_point)} >/dev/null "
+            f"2>{shlex.quote(str(error_path))}; "
+            f"printf '%s' \"$?\" >{shlex.quote(str(status_path))}"
+        )
+        result = tmux(["run-shell", command])
+        if result.returncode != 0:
+            return (result.stderr or result.stdout).strip() or "access check failed"
+        if not status_path.exists():
+            return "access check did not complete"
+        if status_path.read_text(encoding="utf-8").strip() == "0":
+            return ""
+        return error_path.read_text(encoding="utf-8").strip() or "volume unreadable"
+
+
 def restore_locked(config: Dict[str, object], client_tty: str = "") -> int:
     notify(f"{config['name']} restore · checking storage and SR", "info")
-    session = ensure_session(config)
-    if not session:
-        notify(f"{config['name']} restore failed · could not create SR session", "error")
-        return 1
     if not mounted(config):
         ready, detail = mount_volume(config)
         if not ready:
             notify(f"{config['name']} offline · {detail}", "warn")
             return 1
         notify(f"{config['name']} mounted · restoring SR", "info")
+
+    access_error = workspace_access_error(str(config["mount_point"]))
+    if access_error:
+        audit("restore", f"volume access failed: {access_error}")
+        if (
+            "Operation not permitted" in access_error
+            or "Permission denied" in access_error
+        ):
+            detail = "disk access denied · check macOS terminal permissions"
+        else:
+            detail = access_error.splitlines()[-1][:160]
+        notify(f"{config['name']} restore failed · {detail}", "error", 10.0)
+        print(access_error, file=sys.stderr)
+        return 1
+
+    session = ensure_session(config)
+    if not session:
+        notify(f"{config['name']} restore failed · could not create SR session", "error")
+        return 1
 
     command = ["switch-client"]
     if client_tty:
