@@ -79,6 +79,13 @@ local keys = {
 
    -- background controls --
    {
+      key = 'b',
+      mods = 'ALT|CTRL|SHIFT',
+      action = wezterm.action_callback(function(window, pane)
+         backdrops:show_category_selector(window, pane)
+      end),
+   },
+   {
       key = [[/]],
       mods = mod.SUPER,
       action = wezterm.action_callback(function(window, _pane)

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: wezbg public|private|toggle|select|random|next|prev|focus\n' >&2
+  printf 'Usage: wezbg public|private|like|favorite|delete|toggle|select|random|next|prev|focus\n' >&2
   exit 2
 }
 
@@ -17,9 +17,9 @@ case "$command" in
   private|pri|personal|home)
     value="private"
     ;;
-  toggle|select)
+  like|toggle|select)
     ;;
-  random|next|prev|previous|focus)
+  favorite|delete|random|next|prev|previous|focus)
     var="backdrop_action"
     ;;
   *)

@@ -12,22 +12,28 @@ math.random()
 
 local PATH_SEP = platform.is_win and '\\' or '/'
 local DEFAULT_CATEGORY = 'public'
-local CATEGORY_ORDER = { 'public', 'private' }
+local CATEGORY_ORDER = { 'public', 'private', 'like' }
 local CATEGORY_LABELS = {
    public = 'Public',
    private = 'Private',
+   like = 'Like (Public + Private)',
    all = 'All',
 }
 local CATEGORY_DIRS = {
    public = {
       'backdrops/public',
+      'backdrops/public/like',
    },
    private = {
       'backdrops/private',
+      'backdrops/private/like',
    },
+   like = { 'backdrops/public/like', 'backdrops/private/like' },
    all = {
       'backdrops/public',
       'backdrops/private',
+      'backdrops/public/like',
+      'backdrops/private/like',
       'backdrops',
       'backdrops_past',
    },
@@ -165,10 +171,6 @@ function BackDrops:set_files(category)
    end
 -- 【修改这里】注释掉下面这行，防止启动时自动加载图片
    -- wezterm.GLOBAL.background = self.files[1]
-   if #self.files == 0 and category ~= 'all' then
-      return self:set_files('all')
-   end
-
    return self
 end
 
@@ -176,6 +178,9 @@ function BackDrops:category_choices()
    return {
       { id = 'public', label = '󰖙 Public  公开场合' },
       { id = 'private', label = '󰌾 Private 私密' },
+      { id = 'like', label = 'Like 收藏轮播（含 Public / Private）' },
+      { id = 'favorite', label = '收藏当前图片 → like/' },
+      { id = 'delete', label = '删除当前图片 → deleted/（可恢复）' },
    }
 end
 
@@ -191,6 +196,7 @@ end
 ---@private
 ---@param window any WezTerm Window see: https://wezfurlong.org/wezterm/config/lua/window/index.html
 function BackDrops:_set_opt(window)
+   self.focus_on = false
    local opts = {
       background = {
          {
@@ -214,6 +220,7 @@ end
 ---@private
 ---@param window any WezTerm Window see: https://wezfurlong.org/wezterm/config/lua/window/index.html
 function BackDrops:_set_focus_opt(window)
+   self.focus_on = true
    local opts = {
       background = {
          {
@@ -248,6 +255,18 @@ function BackDrops:_notify(window, title, message)
    end
 end
 
+-- Window overrides survive config reloads; GLOBAL may already hold another image.
+function BackDrops:current_image(window)
+   local opts = window:get_config_overrides() or {}
+   local layers = opts.background
+   if layers == nil then layers = window:effective_config().background end
+   for _, layer in ipairs(layers or {}) do
+      if layer.source and type(layer.source.File) == 'string' then
+         return layer.source.File
+      end
+   end
+end
+
 function BackDrops:switch_category(window, category, randomize)
    category = normalize_category(category)
    if not category then
@@ -257,6 +276,12 @@ function BackDrops:switch_category(window, category, randomize)
 
    self:set_files(category)
    self.current_idx = 1
+   if #self.files == 0 then
+      wezterm.GLOBAL.background = nil
+      self:_set_focus_opt(window)
+      self:_notify(window, 'Backdrop', category_label(category) .. ': no images')
+      return
+   end
 
    if randomize ~= false then
       self:random(window)
@@ -265,6 +290,92 @@ function BackDrops:switch_category(window, category, randomize)
    end
 
    self:_notify(window, 'Backdrop', category_label(self.category))
+end
+
+-- Move, rather than copy: one image has one location and cannot reappear in rotation.
+function BackDrops:move_current(window, folder)
+   if folder ~= 'like' and folder ~= 'deleted' then return end
+   local source = self:current_image(window)
+   if not source then
+      self:_notify(window, 'Backdrop', 'No current image')
+      return
+   end
+   local root = wezterm.config_dir .. PATH_SEP .. 'backdrops' .. PATH_SEP
+   local relative = source:sub(1, #root) == root and source:sub(#root + 1) or ''
+   local category = relative:match('^(public)/') or relative:match('^(private)/')
+   if not category then
+      self:_notify(window, 'Backdrop', 'Only Public / Private images can be moved')
+      return
+   end
+   if relative:match('^[^/]+/like/') and folder == 'like' then
+      self:_notify(window, 'Backdrop', 'Already in Like')
+      return
+   end
+   local dir = root .. category .. PATH_SEP .. folder
+   local ok = wezterm.run_child_process({ 'mkdir', '-p', dir })
+   if not ok then
+      self:_notify(window, 'Backdrop', 'Cannot create ' .. dir)
+      return
+   end
+   local name = source:match('([^/]+)$')
+   local destination = dir .. PATH_SEP .. name
+   local index = 1
+   local function exists(path)
+      local link = wezterm.run_child_process({ 'test', '-L', path })
+      return is_readable_file(path) or link
+   end
+   while exists(destination) do
+      destination = dir .. PATH_SEP .. index .. '-' .. name
+      index = index + 1
+   end
+   local is_link, target = wezterm.run_child_process({ 'readlink', source })
+   local moved, err
+   if is_link then
+      target = target:gsub('\n$', '')
+      if target:sub(1, 1) ~= '/' then
+         target = source:match('^(.*)/[^/]+$') .. '/' .. target
+      end
+      local output
+      moved, output, err = wezterm.run_child_process({ 'ln', '-s', target, destination })
+      if moved then
+         moved, err = os.remove(source)
+         if not moved then os.remove(destination) end
+      end
+   else
+      moved, err = os.rename(source, destination)
+   end
+   if not moved then
+      self:_notify(window, 'Backdrop', 'Move failed: ' .. tostring(err))
+      return
+   end
+   self:set_files(self.category)
+   if folder == 'like' then
+      wezterm.GLOBAL.background = destination
+      for idx, file in ipairs(self.files) do
+         if file == destination then self.current_idx = idx; break end
+      end
+      self:_set_opt(window)
+   elseif #self.files > 0 then
+      self:set_img(window, math.min(self.current_idx, #self.files))
+   else
+      wezterm.GLOBAL.background = nil
+      self:_set_focus_opt(window)
+   end
+   self:_notify(window, 'Backdrop', folder .. '/' .. name)
+end
+
+function BackDrops:confirm_delete(window, pane)
+   local source = self:current_image(window)
+   if not source then return self:_notify(window, 'Backdrop', 'No current image') end
+   window:perform_action(wezterm.action.InputSelector({
+      title = 'Move to deleted/: ' .. source:match('([^/]+)$'),
+      choices = { { id = 'cancel', label = '取消' }, { id = 'delete', label = '删除（可从 deleted/ 恢复）' } },
+      action = wezterm.action_callback(function(win, _pane, choice)
+         if choice == 'delete' and self:current_image(win) == source then
+            self:move_current(win, 'deleted')
+         end
+      end),
+   }), pane)
 end
 
 function BackDrops:toggle_category(window)
@@ -391,14 +502,22 @@ function BackDrops:show_image_selector(window, pane)
 end
 
 function BackDrops:show_category_selector(window, pane)
+   local source = self:current_image(window)
    window:perform_action(
       wezterm.action.InputSelector({
-         title = 'Backdrop Mode',
+         title = 'Backdrop: ' .. (source and source:match('([^/]+)$') or 'No image'),
          choices = self:category_choices(),
          fuzzy = true,
          fuzzy_description = 'Backdrop mode: ',
          action = wezterm.action_callback(function(selector_window, _pane, category)
             if not category then
+               return
+            end
+            if category == 'favorite' then
+               self:move_current(selector_window, 'like')
+               return
+            elseif category == 'delete' then
+               self:confirm_delete(selector_window, _pane)
                return
             end
             self:switch_category(selector_window, category, true)
@@ -429,6 +548,10 @@ function BackDrops:setup_events()
             self:show_image_selector(window, pane)
          elseif value == 'focus' then
             self:toggle_focus(window)
+         elseif value == 'favorite' then
+            self:move_current(window, 'like')
+         elseif value == 'delete' then
+            self:confirm_delete(window, pane)
          end
       end
    end)

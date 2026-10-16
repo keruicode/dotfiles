@@ -11,6 +11,22 @@
 !/backdrops/public/.gitkeep
 /backdrops/private/*
 !/backdrops/private/.gitkeep
+!/backdrops/public/like/
+!/backdrops/public/deleted/
+!/backdrops/private/like/
+!/backdrops/private/deleted/
+/backdrops/*/like/*
+/backdrops/*/deleted/*
+!/backdrops/*/like/.gitkeep
+!/backdrops/*/deleted/.gitkeep
 /backdrops_past/
 
 .DS_Store
+
+# Imported local reference copies and images are not portable configuration.
+/wezterm-config-china/
+/wezterm-config-foreign/
+/wezterm-my.lua
+/Codex_resume_wezterm_tab_capsule.md
+/README.md
+/*.png

@@ -75,12 +75,15 @@ Colemak 的移动方式。
 | `Cmd+/` | 随机背景图 |
 | `Cmd+,` / `Cmd+.` | 上一张 / 下一张 |
 | `Ctrl+Cmd+/` | 搜索当前分类中的图片 |
-| `Ctrl+Cmd+b` | 切换公开 / 私人分类 |
-| `Shift+Ctrl+Cmd+b` | 打开分类选择器 |
+| `Ctrl+Cmd+b` | 循环 Public / Private / Like |
+| `Shift+Ctrl+Cmd+b` | 分类、收藏当前图片、删除当前图片 |
 | `Cmd+b` | 切换图片 / 专注纯色背景 |
 
 也可以在 shell 中使用 `wezbg public`、`wezbg private`、`wezbg random`、
 `wezbg focus` 等命令控制当前窗口。
+
+新增 `wezbg like`（收藏轮播）、`wezbg favorite`（收藏当前图片）、`wezbg delete`
+（确认后移出轮播）。目录及恢复方式见 [WezTerm README](wezterm/README.md)。
 
 本机专用 SSH 域写在 `~/.config/wezterm/config/domains_local.lua`，可从
 [domains_local.example.lua](./wezterm/.config/wezterm/config/domains_local.example.lua)

@@ -4172,3 +4172,125 @@ MARKDOWN_R_SAVE_TEX_AND_REMOTE_GUARD_OK；git diff --check通过。
 拟使用提交标题 Improve terminal recovery, external disk workflows and editor configs。
 提交/推送后以master的git log和origin/master一致性复核最终状态；本记录随提交保存，
 不为写入自身commit哈希再制造额外提交。最终回复文件tmp/git_提交与推送.md。
+
+## 2026-10-12：录屏定位提示符清理回退光标，已修复
+
+读取参考图/录屏2026-10-12 11.38.45.mov，14.89秒4058x2218；ffmpeg每3秒
+抽帧到.gitignore已忽略的.tmp/tmux_video。视频显示讲义批改左pane输出曾出现，
+缩放/切换后消失或移动，右pane正常。用户补充有时pwd也不显示。
+隔离tmux复现：先1049h/1049l模拟TUI，再连续printf正常输出和1049l，
+capture-pane中只剩最后一次输出。确认10月4日加入的每次precmd无条件1049l
+会恢复旧光标并覆盖输出，10月11日仅关闭流控未处理此根因。
+
+修改aliases.zsh为按真实symlink解析位置加载terminal.zsh；新增terminal.zsh
+保留流控和鼠标清理，仅当TMUX_PANE的alternate_on=1时发送1049l。
+新shell自动加载无需Stow helper也能解析，旧shell可source aliases热加载。
+新增tmux/tests/test_prompt_terminal.py，独立唯一socket，finally清理服务器。
+测试完整TUI退出后的3次输出保留及窗口缩放，另验证残留alt/mouse仍可清理。
+pytest全部19项通过（最终对测试等待方式再做消除竞态调整并复核）；zsh语法、
+Black和Ruff通过。没有改GPU/WezTerm主题等无证据设置。
+
+现场%46/%47在3-T_WORK:讲义批改，capture确认空提示符后加载terminal.zsh。
+%46有父Yazi及嵌套前台zsh91232，未杀掉Yazi；%47前台zsh91382。
+仅这两个pane热加载；在%46运行pwd+CHECK_1及下一次pwd+CHECK_2，capture
+确认两次路径和marker均保留。其他旧shell仍有旧函数，需source aliases或新开。
+更新tmux README和最终回复分组tmp/tmux_恢复显示问题.md，本轮未commit/push。
+新mov是用户未追踪文件，保留原样；此前78e7374已推GitHub且提交前工作区干净。
+
+## 2026-10-12：新增截图，Yazi 图片越界到其他 pane
+
+检查参考图/32e9f269-b4e6-4b32-be8c-8a4b3ea4142d.png：1-IAP:latex
+右下Yazi正常预览-7C图片，但旧-6C图片越界进入上方Codex。与之前shell重复
+1049l导致输出覆盖是不同现象，不宣称同一根因。现场Yazi在%13，未退出它。
+
+核对安装Yazi26.1.22、tmux3.6a；阅读同版本上游adapter/emulator/mgr peek源码。
+IIP透传存在光标同步风险，上游emulator::move_lock已有针对tmux的重复定位补丁；
+单凭截图不能确认透传是唯一根因。非TTY yazi --debug选择X11不代表现场实际协议。
+
+本地zoom插件存在明确风险：普通preview无过期检查，按键entry直接peek绘图，
+不受Yazi的预览任务取消管理。现改entry为ya.emit("peek",force=true,only-if=url)，
+peek开始分配generation，绘图前校验当前hovered URL、level、generation及区域
+x/y/w/h；完成后删除magick临时文件。保持66%/86%初始大小与15%缩放步长。
+增加yazi/tests/test_zoom.lua模拟六种情景，lua运行6项通过；git diff --check通过。
+同步更新Yazi README与tmp/tmux_恢复显示问题.md。配置目录链接指向仓库，已落地。
+
+尚未在真实WezTerm图形界面复测，不能宣称残影全部解决。请用户q退出受影响Yazi，
+ra重开加载新插件，切图/缩放/切session复测；必要时C-s R重绘。不要kill-server，
+没有终止任何Codex或tmux会话。本轮未commit/push，此前Oct12改动仍保留。
+
+## 2026-10-15：WezTerm 背景图收藏与删除
+
+用户要求背景菜单在Public/Private之外增加Like及收藏、删除操作，目录可手动整理。
+修改wezterm/.config/wezterm/utils/backdrops.lua：Public/Private各扫描根目录与like，
+Like汇总public/like与private/like；deleted永不扫描（含all）。空分类不再回退all，
+显示纯色避免私图泄漏。菜单favorite将当前图片移到like；delete二次确认后移到
+deleted并切下一张；移动失败通知、同名数字前缀避让。相对软链接转为原位置解析
+的绝对目标再移动链接，不动原始图库。_set_opt/_set_focus_opt同步focus_on状态。
+
+bindings.lua保留Ctrl+Cmd+Shift+b且新增用户提到的Ctrl+Alt+Shift+b同功能入口。
+bin/wezbg新增like/favorite/delete。新增wezterm/README.md，中英文根README同步。
+本机~/.config/wezterm/utils/backdrops.lua与bin/wezbg为仓库文件软链接，修改已落地。
+创建本机backdrops/public/{like,deleted}和private/{like,deleted}四个空目录，没有
+移动用户任何现有图片（实际操作由用户选择菜单触发）。背景资产原有gitignore继续覆盖。
+
+新增wezterm/tests/test_backdrops.lua，临时独立目录测试收藏、相对软链接、取消/
+确认删除、同名避让、所有轮播排除deleted、空Public不混Private，全部通过。
+wezterm show-keys配置加载成功，bash -n wezbg及git diff --check通过。
+未通过GUI点击真实图片进行移动测试；未重启WezTerm或tmux。自动重载后菜单生效，
+必要时Reload Configuration。最终答复分组tmp/wezterm_背景图收藏与删除.md。
+未commit/push，前轮Yazi/zsh/tmux未提交改动及用户参考视频图片完整保留。
+
+## 2026-10-15：用户报告配置不在dotfiles、收藏错图
+
+核查~/.config/wezterm/wezterm.lua、utils/backdrops.lua均软链接到仓库隐藏目录
+wezterm/.config/wezterm；git ls-files确认原有配置已经跟踪，新增README尚未提交。
+本机另有历史参考配置目录和本机专用domains_local.lua，非当前加载入口，未迁移。
+给wezterm/README补可点击源码链接与隐藏目录说明；四个like/deleted目录加.gitkeep，
+扩展局部.gitignore只允许占位文件，继续忽略图片。
+
+确认收藏实现缺陷：GLOBAL.background会在配置init/random或其他窗口换图后与
+本窗口background override不一致。新增current_image(window)读取get_config_overrides
+或effective_config的实际File层。move_current及confirm_delete改用该值；纯色无图
+不动文件，确认删除期间只验证当前窗口图未变。菜单标题显示实际图名。
+测试模拟GLOBAL指向私图而window显示公图，验证收藏的是公图；确认删除期间GLOBAL
+变化不误判；纯色不收藏隐藏图片。lua测试与wezterm show-keys配置加载通过。
+未操作用户真实图片、未GUI复测；配置已通过软链接落地，未commit/push。
+
+## 2026-10-15：整个WezTerm目录迁入dotfiles并建立目录软链接
+
+用户明确指出~/.config/wezterm本身不是软链接，要求整体管理。实测源目录132MB，
+仓库148KB；源中部分配置为文件软链接，其余图片、图库参考配置、本机配置仍在原目录。
+使用.tmp/migrate_wezterm_directory.py先预检，967项待导入且零冲突；复制普通文件
+并校验SHA256，软链接保持目标（内部路径重定位到仓库），已有同目标配置不重复复制。
+将原目录重命名~/.config/wezterm.before-directory-link-20261015-234409后，建立
+~/.config/wezterm -> /Users/xiaoxiaotu/dotfiles/wezterm/.config/wezterm目录软链接。
+原目录完整备份保留。真实文件现在在仓库目录内，本地图片、历史参考config目录、
+domains_local.lua等由.gitignore排除，未提交图片、凭据或参考嵌套Git仓库。
+wezterm show-keys配置加载通过，ls -ld证实目录为lrwx；背景图路径对照检查无新增断链。
+更新wezterm/README和最终答复分组文件。未commit/push，未重启WezTerm/tmux。
+
+## 2026-10-16：修复Private图片Yazi预览空白
+
+用户报告Private图片无法预览。检查862张图均非断链，抽查file -L与magick identify
+确认JPEG正常。用.tmp/check_yazi_preview.py启动独立pexpect PTY中的实际Yazi，
+模拟WezTerm终端能力回复，加载用户原配置、选定Private/0907573BQMx.jpg软链接。
+初始IIP图片输出0；.tmp/yazi_preview_state/yazi/yazi.log显示zoom第85行image_info
+报bad argument #1: userdata has been destructed。
+
+根因是Oct12增加begin(url)同步检查消费Url所有权，后续image_info继续使用失效对象。
+save与latest也有同类复用风险。现begin/save/is_current全部传Url(url)副本，保留job
+原始对象；未移除防旧任务/旧区域渲染检查。更新Lua测试mock，模拟同步参数的所有权
+转移，6项回归通过。修复后重跑实际Yazi进程，IIP图片输出1、日志无错误。
+这是实际程序及预览协议输出验证，并非用户屏幕目视验证。独立进程正常q退出，
+未操作用户现有Yazi/tmux/Codex。用户需q退出旧Yazi再ra重开加载插件。
+更新Yazi README和tmp/tmux_恢复显示问题.md；git diff --check通过；未commit/push。
+
+## 2026-10-16：按用户要求提交并上传GitHub
+
+本轮整理此前未提交的WezTerm背景收藏/删除与当前窗口识别、目录软链接管理文档、
+Yazi预览任务及Url所有权修复、zsh终端清理与tmux输出覆盖修复及其测试。
+python3 -m pytest -q tmux/tests：19 passed；Lua两套回归、shell语法、diff检查通过。
+已fetch origin；目标master，远端git@github.com:keruicode/dotfiles.git。
+提交说明Fix terminal rendering and add WezTerm backdrop favorites。
+本机图库和专属配置由ignore排除；参考图中新截图与录屏未纳入提交，保留用户原件。
+本条记录随功能提交保存；实际commit hash及推送结果用git log/status确认。

@@ -6,18 +6,8 @@ if [[ -n ${TMUX-} || ${TERM_PROGRAM-} == WezTerm ]]; then
   export COLORTERM=truecolor
 fi
 
-# TUI crashes may leave tmux forwarding mouse coordinates to the shell.
-# Run only at an interactive prompt, never while a foreground TUI owns the tty.
-_dotfiles_prompt_terminal_reset() {
-  [[ -o interactive && -n ${TMUX-} && -t 1 ]] || return 0
-  # Ctrl-S belongs to tmux; do not let a forwarded key freeze shell output.
-  stty -ixon -ixoff 2>/dev/null
-  printf '\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l\033[?1015l\033[?1004l\033[?1049l\033[?25h'
-}
-if [[ -o interactive && -n ${TMUX-} ]]; then
-  autoload -Uz add-zsh-hook
-  add-zsh-hook precmd _dotfiles_prompt_terminal_reset
-fi
+# Resolve the symlink so the helper is available before a new Stow deployment.
+source "${${(%):-%N}:A:h}/terminal.zsh"
 
 # A nested zsh inherits Conda state but not Conda's left-side prompt prefix.
 # Reactivate the same environment once to refresh PROMPT without adding a level.

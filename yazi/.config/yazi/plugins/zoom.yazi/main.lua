@@ -1,7 +1,22 @@
 --- @since 26.1.22
 
 local get = ya.sync(function(st, url) return st.last == url and st.level end)
-local latest = ya.sync(function(st, url, level) return st.last == url and st.level == level end)
+local begin = ya.sync(function(st, url)
+	local h = cx.active.current.hovered
+	if not h or h.url ~= url then return end
+	st.generation = (st.generation or 0) + 1
+	return st.generation
+end)
+local is_current = ya.sync(function(st, url, level, generation, x, y, w, hgt)
+	local h, current = cx.active.current.hovered, ui.area("preview")
+	return h and h.url == url and st.last == url and st.level == level
+		and st.generation == generation
+		and current.x == x and current.y == y
+		and current.w == w and current.h == hgt
+end)
+local function latest(url, level, generation, area)
+	return is_current(Url(url), level, generation, area.x, area.y, area.w, area.h)
+end
 
 local MIN_LEVEL, MAX_LEVEL, STEP = 0, 10, 0.15
 local BASE_FIT = 0.66
@@ -37,11 +52,7 @@ local move = ya.sync(function(st, motion, reset)
 end)
 
 local function end_(job, err)
-	if not job.old_level then
-		ya.preview_widget(job, err and ui.Text(err):area(job.area):wrap(ui.Wrap.YES))
-	elseif err then
-		ya.notify { title = "Zoom", content = tostring(err), timeout = 5, level = "error" }
-	end
+	ya.preview_widget(job, err and ui.Text(err):area(job.area):wrap(ui.Wrap.YES))
 end
 
 local function canvas(area)
@@ -69,16 +80,16 @@ end
 
 local function peek(_, job)
 	local url = job.file.url
+	-- ya.sync transfers ownership of Url arguments; retain the job's original.
+	local generation = begin(Url(url))
+	if not generation then return end
 	local info, err = ya.image_info(url)
 	if not info then
 		return end_(job, Err("Failed to get image info: %s", err))
 	end
 
-	local requested = job.new_level
-	if requested == nil then
-		requested = get(Url(url)) or tonumber(job.args[1]) or 0
-		save(url, requested)
-	end
+	local requested = get(Url(url)) or tonumber(job.args[1]) or 0
+	save(Url(url), requested)
 
 	if job.area.w <= 0 or job.area.h <= 0 then
 		return end_(job, "Preview pane is hidden; press z p or z r to show it.")
@@ -95,23 +106,11 @@ local function peek(_, job)
 		math.floor((max_w / base_w - 1) / STEP),
 		math.floor((max_h / base_h - 1) / STEP)
 	))
-	if job.old_level and job.old_level > max_level and (job.motion or 0) < 0 then
-		requested = max_level + job.motion
-	end
-
 	local before_clamp = requested
 	local level = ya.clamp(MIN_LEVEL, requested, max_level)
 	requested = level
-	if job.old_level and level ~= before_clamp then
-		save(url, level)
-	end
-
-	if job.old_level and level == job.old_level and (job.motion or 0) > 0 then
-		ya.notify { title = "Zoom", content = "Already at maximum preview size", timeout = 2, level = "warn" }
-		return
-	elseif job.old_level and level == job.old_level and (job.motion or 0) < 0 then
-		ya.notify { title = "Zoom", content = "Already at minimum preview size", timeout = 2, level = "warn" }
-		return
+	if level ~= before_clamp then
+		save(Url(url), level)
 	end
 
 	local scale = math.max(0.1, 1 + level * STEP)
@@ -132,10 +131,11 @@ local function peek(_, job)
 		end_(job, Err("Failed to start `magick`, error: %s", err))
 	elseif not output.status.success then
 		end_(job, Err("`magick` exited with error code %s: %s", output.status.code, output.stderr))
-	elseif not job.old_level or latest(url, requested) then
+	elseif latest(url, requested, generation, job.area) then
 		ya.image_show(Url(tmp), job.area)
 	end
-	end_(job)
+	os.remove(tmp)
+	if latest(url, requested, generation, job.area) then end_(job) end
 end
 
 local function entry(self, job)
@@ -148,15 +148,8 @@ local function entry(self, job)
 	end
 
 	if st.changed then
-		peek(self, {
-			area = ui.area("preview"),
-			args = {},
-			file = File { url = st.url, cha = Cha { mode = tonumber("100644", 8) } },
-			skip = 0,
-			new_level = st.level,
-			old_level = st.old,
-			motion = motion,
-		})
+		-- Let Yazi cancel the preceding preview task before rendering the new size.
+		ya.emit("peek", { force = true, ["only-if"] = st.url })
 	elseif motion > 0 then
 		ya.notify { title = "Zoom", content = "Already at maximum preview size", timeout = 2, level = "warn" }
 	elseif motion < 0 then

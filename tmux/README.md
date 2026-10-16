@@ -605,8 +605,10 @@ Alt+f（按两次）
 面板仍保留鼠标上报模式，tmux 因而把鼠标事件转给了已经回到提示符的 shell。
 这不是 LaTeX 文件内容损坏，也不需要关闭 tmux 全局鼠标功能。
 
-`zsh/.config/zsh/aliases.zsh` 现在通过 `precmd` 在交互式 tmux shell
-显示提示符前关闭残留的鼠标、焦点上报及备用屏幕模式；前台程序运行期间不执行。
+`zsh/.config/zsh/aliases.zsh` 加载 `terminal.zsh`，通过 `precmd` 在交互式
+tmux shell 显示提示符前关闭残留鼠标和焦点上报。备用屏幕仅在 tmux 的
+`alternate_on=1` 时退出；不能每次提示符都发送 `1049l`，否则会恢复旧光标
+并覆盖命令输出。前台程序运行期间不执行此清理。
 新 shell 自动加载。已经打开的旧 shell 需在空闲提示符执行
 `source ~/.config/zsh/aliases.zsh` 才会加载新保护。
 加载后，若 shell 输入行被污染，按 `Ctrl+C` 取消输入并触发提示符清理，
@@ -642,3 +644,9 @@ shell 的 Ctrl+s 暂停输出。新 shell 自动生效；旧 shell 可在空闲�
 后仍能输出。由于未捕获用户报告的异常现场，这属于已确认配置问题的修正，
 尚不能断定所有无输出现象都由流控引起。若再次发生，保留现场并记录 window/pane，
 对比 `tmux capture-pane` 与屏幕：缓冲有输出而屏幕无输出时再排查客户端渲染。
+
+2026-10-12 录屏问题已复现：旧提示符清理无条件发送 `1049l`，面板运行过
+全屏程序后，后续命令输出会被重复恢复的旧光标覆盖。已修为先查询
+`#{alternate_on}`，仅为1时发送该序列。回归测试覆盖全屏程序退出、连续提示符、
+窗口缩放及残留鼠标模式清理。视频“讲义批改”的两个旧shell已热加载修正；
+其他已打开旧shell需执行 `source ~/.config/zsh/aliases.zsh`，新shell自动加载。

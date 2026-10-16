@@ -77,12 +77,16 @@ may be regular files or symlinks; the repository only keeps both directories.
 | `Cmd+/` | Random image |
 | `Cmd+,` / `Cmd+.` | Previous / next image |
 | `Ctrl+Cmd+/` | Search images in the current category |
-| `Ctrl+Cmd+b` | Toggle public/private category |
-| `Shift+Ctrl+Cmd+b` | Choose a category |
+| `Ctrl+Cmd+b` | Cycle Public / Private / Like |
+| `Shift+Ctrl+Cmd+b` | Choose category, favorite or delete current image |
 | `Cmd+b` | Toggle image/focus background |
 
 The same controls are available from shells through `wezbg`, for example
 `wezbg public`, `wezbg private`, `wezbg random`, and `wezbg focus`.
+
+Use `wezbg like` for favorites, `wezbg favorite` to favorite the current image, and
+`wezbg delete` to move it out of rotation after confirmation. See
+[WezTerm README](wezterm/README.md) for folders and recovery.
 
 Machine-specific SSH domains belong in
 `~/.config/wezterm/config/domains_local.lua`. Start from
